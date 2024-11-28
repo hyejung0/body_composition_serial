@@ -1,0 +1,591 @@
+---
+title: "Longitudinal changes in body composition and its effect on survival on advanced non-small cell lung caner patients"
+format:
+  html:
+    embed-resources: true
+    code-fold: true
+    toc: true
+execute:
+  cache: true
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message = FALSE,warning=FALSE)
+library(data.table)
+library(table1)
+library(ggplot2)
+library(gridExtra)
+library(purrr)
+library(ggpubr)
+library(survival)
+library(nlme)
+library(JM)
+library(nlme)
+library(survival)
+
+```
+
+
+```{r, cache=T, include=FALSE}
+
+#Below function is required to catch any error with LME regression
+#Because of non-convergence.
+
+myCatch <- function(# The expression to execute.
+  expr,
+  # Further arguments to tryCatch().
+  ...,
+  # User-defined function to extract diagnostic info from
+  # warning object, based on output that resulted from expr.
+  custom_fun = function(result, w){return(w)}) {
+  ######################
+  ## Default Settings ##
+  ######################
+  
+  # Defaults to NULL results and empty list of diagnostics.
+  DEFAULT_RESULTS <- NULL
+  DEFAULT_DIAGNOSTICS <- NULL
+  
+  # Defaults to standard R error message, rather than a ponderous traceback
+  # through the error handling stacks themselves; also returns the error object
+  # itself as the results.
+  DEFAULT_ERROR <- function(e){
+    message("Error in ", deparse(e$call), " : ", e$message)
+    return(e)
+  }
+  
+  
+  ################
+  ## Initialize ##
+  ################
+  
+  # Initialize output to default settings.
+  res <- DEFAULT_RESULTS
+  diag <- DEFAULT_DIAGNOSTICS
+  err <- DEFAULT_ERROR
+  
+  # Adjust error handling if specified by user.
+  if("error" %in% names(list(...))) {
+    err <- list(...)$error
+  }
+  
+  
+  #######################
+  ## Handle Expression ##
+  #######################
+  
+  res <- tryCatch(
+    expr = {
+      withCallingHandlers(
+        expr = expr,
+        # If expression throws a warning, record diagnostics without halting,
+        # so as to store the result of the expression.
+        warning = function(w){
+          parent <- parent.env(environment())
+          parent$diag <- w
+        }
+      )
+    },
+    error = err,
+    ...
+  )
+  
+  
+  ############
+  ## Output ##
+  ############
+  
+  # Package the results as desired.
+  return(list(result = res,
+              diagnostics = custom_fun(res, diag)))
+}
+
+tt<-myCatch(lme(fixed_lme_formula, 
+            random = ~ times_mth | PatientID_fct, 
+            method = "ML", 
+            data = dat,
+            control =list(msMaxIter = 1000, msMaxEval = 1000)
+))
+tt
+
+```
+
+
+```{r,message=FALSE, cache=TRUE}
+
+#read in data 
+
+#| echo: false
+
+dat<-readRDS("clean_dat.rds")
+
+```
+
+# Data
+
+This is a retrospective cohort study of patients with newly diagnosed metastatic non-small cell lung cancer (mNSCLC) patients (N=79) at the Huntsman Cancer Institute (SLC, UT). Only the CT scans measured within 1 year of 1L therapy initiation first year of treatment will be used. Be low is the exclusion criteria.
+
+1.  N=9: Baseline scan data defined and restricted to -60 to +30 days from the date of metastasis diagnosis.
+
+2.  N=1: Baseline scan show 0 area cm2 and missing density (mean HU)
+
+3.  N=6: Does not have any scans within 1 year of metastatic diagnosis, or does not have any scans after diagnosis
+
+4.  N=10: Does not have any CT scans for L3 that can be paired with T3 chest scans (whether they have scans for abdomen and chest separately doesn’t matter. ).
+
+5.  N=3: Only have baseline scan or failed image analysis
+
+6.  N=1: First scan output available exceeds +30 days. In the non-serialized data, we have a scan within -60 to +30 days window, but that was not available in the serialized data
+
+Total 49 unique patients are used.
+
+9 patients’ earliest scan date did not match that of the baseline scan date from the original data. But they all fell within -60/30 days window, so we will keep them.
+
+## Covariates
+
+We have identified age at metastatic diagnosis, gender, smoking status, race/ethnicity, treatment type, BMI (kg/m2), BMI (categorical), tumor histology, and genetic mutation status as baseline covariate to adjust in our modeling.
+
+
+# Statistical methods
+
+## Imputation
+
+The majority of the patients are White/non-Hispanic (31/49). We also have one of Hispanic or Latino, Non-Hispanic Asian, and Other patients. Lastly, 15 patients are missing the value. Thus, we decided to combine of Hispanic or Latino, Non-Hispanic Asian, Other, and patients missing race/ethnicity were combined into “Other/Missing” race category to give sufficient sample size for inference.   
+
+The unit of observation is area of body scan per date per patient. That is, if a patient received a chest and abdomen body scan on a certain date, there are two rows for the patient for the given date. Suppose that the Chest scan was supposed to capture from T1 down to L3. Likewise, suppose the abdomen scan was supposed to capture from T11 down to L5. Then, if the chest scan, for some reason, is missing T11 or T12 scan values, then we referred to the corresponding abdomen scan, and imputed these values if they were present in the abdomen scan, and vice versa for missing abdomen scans. 
+
+Once we performed above imputation, there could still have been missing values. First case is missing not at random. This occurs because each scan is only supposed to focus on certain body components. For example, the chest CT scan is supposed to capture from T1 down to L3, thus we should be missing all values columns L4, L5, and Sacrummid. The other reason is missing at random, where the value is missing when the corresponding row is meant to capture the area. For example, if the observation is meant for Chest scan, then all scans in T section is supposed to exist. However, maybe T1 intermuscular adipose tissue is missing, due to poor image quality, or any other reasons. 
+
+Whether it be missing at random or missing not at random, the adjacent body fat and muscle components are supposed to be highly correlated, and thus, we decided to impute the missing values using all body components as well as the covariate values. 
+
+
+## Models
+
+::: {.img-float}
+![](spine_image.jpg){style="float: left; margin: 5px; width: 300px;"}
+:::
+We are interested in modeling the changes of body composition (longitudinal outcome) as well as the impact of the changes body composition on survival (survival outcome). To do so, we must perform joint modelling approach, rather than fitting separate survival and longitudinal models. There are two reasons for such approach. First, when performing survival modeling with time-dependent covariate, the covariate is required to be external. That is, the body composition at time point t is not affected by death at time point u, with t>u 1. However, the body composition over time does not satisfy this condition, due to the fact that they are the output of a stochastic process generated by the patient, which is directly related to the death mechanism. Therefore, in order to produce valid inferences, a model for the joint distribution of the longitudinal and survival outcomes is required instead.  The second reason is because death causes dropout in the longitudinal measurement since no longitudinal measurements are available at and after death time. We believe that this dropout is nonrandom (i.e. the probability of dropout depends on the unobserved longitudinal response), which may induce bias from an analysis that ignores the dropout process2. 
+
+Baseline hazard function that estimate a relative risk of death based on true and unobserved value of the longitudinal outcome is left unspecified. Or we may change to accelerated failure time (AFT) model. The perks of using AFT instead Cox PH model is that the subject-specific risk at time t depends on the entire body composition history up to time t, whereas for the Cox PH model, the subject-specific risk depends only on the current value of the body composition.
+
+We need the body composition for each time point t, where death occurs. We do not have this value, so we reconstruct the complete longitudinal history using linear mixed effect model. We modeled each body composition based on age at metastatic diagnosis, gender, smoking history, race ethnicity and longitudinal effect of age. Because the data are inherently unbalanced, the random intercept and slope were included to account for the repeated observation on the same patient in the covariance structure.  
+
+
+
+
+# Exploratory Data Analysis
+
+Here we present descriptive summary of the body composition and baseline covariates.
+
+```{r, cache=TRUE}
+#| echo: false
+
+# function that generates Median [Min, Max] in Table 1 for continuous variables 
+my.render.cont <- function(x) {
+  with(stats.default(x), c("", "Median [Min, Max]" =
+                             sprintf("%0.1f [%0.1f, %0.1f]", MEDIAN, MIN, MAX)))
+}
+
+#change the column names
+outcomes<-c("new_OS_time","new_OS_ind")
+covar_cols<-c("ageAtMetDiag"="Age at Metastatic Diagnosis",
+              "gender"="Gender",
+              "smoking"="Smoking",
+              "raceEthnicity"="Race/Ethnicity",
+              "trt_type"="Treatment Type",
+              "bmi"="BMI (kg/m2)",
+              "bmi_cateogrical"="BMI (categorical)",
+              "tumor_hist"="Tumor Histology",
+              "Gene"="Mutation Status" )
+
+body_cols<-colnames(dat)[!colnames(dat) %in% c("PatientID","is_baseline","new_study_date","StudyDate","times","earliest_studydate","metastaticDate",covar_cols,outcomes)]
+
+
+body_cols_names<-
+sapply(body_cols,function(x){
+  
+  pieces_x<-strsplit(x,";")[[1]]
+  
+  if("cross_sectional_area_cm2" %in% pieces_x){
+    # paste(pieces_x[2],"(cm2)",sep=" ")
+    paste("Baseline ",pieces_x[2],"(cm2)",sep=" ")
+    
+  }else if("volume_cm3" %in% pieces_x){
+    # paste(pieces_x[2],"(cm3)",sep=" ")
+    paste("Baseline ",pieces_x[2],"(cm3)",sep=" ")
+    
+  }else if("HU_mean" %in% pieces_x){
+    # paste(pieces_x[2],"(mean HU)",sep=" ")
+    paste("Baseline ",pieces_x[2],"(mean HU)",sep=" ")
+    
+  }else if(stringr::str_detect(string = x,pattern = "whole")){
+    pieces_x2<-strsplit(x,"_")[[1]]
+    
+    # paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    paste("Baseline",pieces_x2[1],"(whole body cm3)",sep=" ")
+  }
+  
+})
+body_cols_names<-do.call(c,body_cols_names)
+
+
+#Just use the baseline data
+dat[,is_baseline:=0]
+dat[StudyDate==earliest_studydate,is_baseline:=1]
+tmp<-dat[is_baseline==1,]
+tmp<-tmp[,.SD,.SDcols = c("PatientID",names(covar_cols),names(body_cols_names))] |> unique()
+setnames(tmp,
+         old=c(names(covar_cols),names(body_cols_names)),
+         new=c(covar_cols,body_cols_names))
+all_cols_for_table1<-c(covar_cols,body_cols_names)
+my_formula<-paste("`",all_cols_for_table1,"`", sep="")
+my_formula<-paste(my_formula,collapse = "+")
+my_formula<-paste("~",my_formula)
+my_formula<-as.formula(my_formula)
+t1_out<-table1(my_formula, render.continuous=my.render.cont, data = tmp)
+```
+
+```{r, cache=TRUE}
+#| echo: FALSE
+#| label: tbl-tab1
+#| tbl-cap: "Descriptive summary of the covariates and body composition at the baseline."
+
+t1_out
+```
+
+We also present plots of body components of interest over time (@fig-hist_all). Most of the body compositions have pretty linear patterns over time. However, SKM (cm3), IMAT (whole body cm3), and SKM (whole body cm3) show a clear non-linear pattern, we explored fitting linear splines model for modeling the longitudinal process. For SKM (cm3) & IMAT (whole body cm3) the approximate time point at which the slope changes is located at t=100, and for SKM (whole body cm3), it’s at t=110. As for the random effect, we wanted to make the model as flexible as possible by fitting random intercept and slope. However, some of the longitudinal processes had issues with convergence for some of the body composition, so only random intercept were kept, which allowed for.
+
+```{r cache=TRUE}
+#| echo: false
+
+setnames(dat,
+         old=c(names(covar_cols),names(body_cols_names)),
+         new=c(covar_cols,body_cols_names))
+
+all_plots<-
+lapply(body_cols_names,function(x){
+  # ggplot(data=dat, aes(x=times, y=get(x),group = PatientID))+
+  #   geom_point() +
+  #   geom_line()+
+  #   ylab(x)
+  
+  ggplot(data=dat)+
+    geom_point(aes(x=times, y=get(x),group = PatientID)) +
+    geom_line(aes(x=times, y=get(x),group = PatientID), alpha=0.2)+
+    stat_smooth(
+      data=dat,
+      mapping=aes(x=times, y=get(x)),
+      geom="smooth",
+      method="lm",
+      formula=y~ splines::ns(x,df=3), 
+      col="red")+
+    ylab(x)+
+    xlab("Time (days)")
+  
+})
+```
+
+```{r fig.show="hold", cache=TRUE, fig.width=8, fig.height=17}
+#| label: fig-hist_all
+#| code-fold: true
+#| echo: FALSE
+#| fig-cap: "Longitudinal plot of body composition over time."
+
+# tmp<-arrangeGrob(grobs = all_plots, nrow=8, ncol=2)
+# grid.arrange(tmp,ncol=1,nrow=1)
+
+
+combined_plot <- ggarrange(
+  all_plots[[1]], all_plots[[2]], 
+  all_plots[[3]], all_plots[[4]],
+  all_plots[[5]], all_plots[[6]],
+  all_plots[[7]], all_plots[[8]],
+  all_plots[[9]], all_plots[[10]],
+  all_plots[[11]], all_plots[[12]],
+  all_plots[[13]], all_plots[[14]],
+  all_plots[[15]], all_plots[[16]],
+  ncol = 2, nrow = 8)
+print(combined_plot)
+```
+
+```{r cache=TRUE}
+#| echo: FALSE
+
+#Look at median survival
+dat[,is_baseline:=0]
+dat[StudyDate==earliest_studydate,is_baseline:=1]
+dat[,new_OS_time_mth:=new_OS_time/30]
+baseline_dat<-dat[is_baseline==1,]
+fit1 <- survfit(Surv(new_OS_time_mth, new_OS_ind) ~ 1, data = baseline_dat)
+summary_fit1<-summary(fit1)$table
+# source("survfit_median_CI.R")
+# # survfit_median_CI(fit1)
+
+```
+
+@fig-KMplot shows Kaplan Meier survival plot. The median time to death of patients were `r sprintf("%.2f",summary_fit1["median"])` months (95% confidence interval: `r sprintf("%.2f",summary_fit1["0.95LCL"])` – `r sprintf("%.2f",summary_fit1["0.95UCL"])`).
+
+```{r cache=TRUE}
+#| label: fig-KMplot
+#| fig-cap: "Kaplan-Meier curve demonstrating survival probability over time (months)."
+#| warning: FALSE
+#| echo: FALSE
+
+source("return_km_plot.R")
+
+km_plot<-return_km_plot(data = baseline_dat, time="new_OS_time_mth",status ="new_OS_ind" )
+
+#Remove legend
+# Assuming your plot is saved as 'x'
+km_plot$plot <- km_plot$plot + theme(legend.position = "none")
+km_plot
+```
+
+# Join modeling of longitudinal and time-to-event processes
+```{r, cache=TRUE}
+#| echo: FALSE
+#| warning: FALSE
+#reset the data
+
+dat<-readRDS("clean_dat.rds")
+dat[,is_baseline:=0]
+dat[new_study_date==metastaticDate,is_baseline:=1]
+dat[,PatientID_fct:=factor(PatientID)] #Must change to factor to use in my regression as random effect. 
+
+
+#save column names
+covar_cols<-c("ageAtMetDiag","gender","smoking","raceEthnicity","trt_type","bmi","bmi_cateogrical","tumor_hist","Gene" )
+outcomes<-c("new_OS_time","new_OS_ind")
+body_cols<-colnames(dat)[!colnames(dat) %in% c("PatientID","PatientID_fct","is_baseline","new_study_date","StudyDate","times","earliest_studydate","metastaticDate",covar_cols,outcomes)]
+body_cols_names<-
+  sapply(body_cols,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"cm2",sep="_")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"cm3",sep="_")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"mean_HU",sep="_")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"whole_body_cm3",sep="_")
+    }
+    
+  })
+
+setnames(dat,
+         old=names(body_cols_names),
+         new=body_cols_names)
+
+
+#Re-scale to moth
+dat[,new_OS_time_mth:=new_OS_time/30]
+dat[,times_mth:=times/30]
+```
+
+```{r, cache=TRUE}
+#| echo: FALSE
+#| warning: FALSE
+#generate time-dependent dataset
+
+
+
+baseline_dat<-dat[is_baseline==1,]
+tmp2<-tmerge(baseline_dat,baseline_dat,id=PatientID,endpt = event(new_OS_time_mth, new_OS_ind))
+
+tmp3<-tmerge(tmp2, dat, id=PatientID, 
+             `IMAT_cm2` = tdc(times, `IMAT_cm2`),
+             `IMAT_cm3` = tdc(times, `IMAT_cm3`),
+             `IMAT_mean_HU` = tdc(times, `IMAT_mean_HU`),
+             `SAT_cm2` = tdc(times, `SAT_cm2`),
+             `SAT_cm3` = tdc(times, `SAT_cm3`),
+             `SAT_mean_HU` = tdc(times, `SAT_mean_HU`),
+             `SKM_cm2` = tdc(times, `SKM_cm2`),
+             `SKM_cm3` = tdc(times, `SKM_cm3`),
+             `SKM_mean_HU` = tdc(times, `SKM_mean_HU`),
+             `VAT_cm2` = tdc(times, `VAT_cm2`),
+             `VAT_cm3` = tdc(times, `VAT_cm3`),
+             `VAT_mean_HU` = tdc(times, `VAT_mean_HU`),
+             `IMAT_whole_body_cm3` = tdc(times, `IMAT_whole_body_cm3`),
+             `SAT_whole_body_cm3` = tdc(times, `SAT_whole_body_cm3`),
+             `SKM_whole_body_cm3` = tdc(times, `SKM_whole_body_cm3`),
+             `VAT_whole_body_cm3` = tdc(times, `VAT_whole_body_cm3`)
+)
+
+
+tmp3<-data.table(tmp3)
+# tmp3[PatientID=="108345_00003",.SD,.SDcols = c("PatientID","new_study_date",outcomes,body_cols_names[1], "tstart","tstop")]
+# dat[PatientID=="108345_00003",.SD,.SDcols = c("PatientID","new_study_date",outcomes,"times",body_cols_names[1])]
+#tmp3 is the time-varying covariate thing!
+
+# #Ordering of the two data set must be the same between dat and tmp3.
+# dat_pt<-dat$PatientID|> unique()
+# tmp3_pt<-tmp3$PatientID|> unique()
+# identical(dat_pt,tmp3_pt) #TRUE
+```
+
+
+To perform joint modeling, we must fit LMER and survival model separately first. Here we fit the LMER. When I tried to do so, IMAT (cm3), SKM (cm2),IMAT (whole body cm3) and SAT (whole_cm3)  models did not converge due to singularity. I tried to debug using IMAT (cm3). I fitted the model again but now using using `lme4::lmer` function. This function still fits the model even though some parameter estimates might not be valid. Upon fitting the model, I realized that the estimated correlation between random intercept and slope (slope using `time_mth`) are showing perfect correlation of 1. This usually means that the optimization algorithm hit "a boundary": correlations cannot be higher than +1 or lower than -1. Even if there are no explicit convergence errors or warnings, this potentially indicates some problems with convergence because we do not expect true correlations to lie on the boundary. This usually means that there are not enough data to estimate all the parameters reliably and power can be compromised. The same results were observed for SKM (cm2) and IMAT (whole body cm3) models. However, for SAT (whole_cm3), fitting the model using `lme4::lmer` did not produce any issues.
+
+Since the problem arose due to having too much parameters to estimate, I decided to simplify the model by restricting no correlation between the random intercept and slope (allowing for different variance for intercept and slope but making covariatence to zero). I restricted this to all four models that did not converge using `nlme::lme`, even though SAT (whole_cm3) converged fine using `lme4::lmer`. The reason being, each package uses different methods to fit the model. I wanted to preserve the same method on all models fit, so I decided to use `nlme::lme` for all models. Since SAT (whole_cm3) didn't converge using `nlme::lme`, I decided to reduce the number of parameters to fit, even though we couldn't figure out why it didn't converge. When the number of parameters were restricted, I was able to get convergence for all four models. 
+
+
+```{r, cache=TRUE}
+#| echo: FALSE
+#| warning: FALSE
+#Fit the linear mixed effect model
+#for all body compositions except for SKM (cm3), IMAT (whole body cm3), and SKM (whole body cm3)
+#Do linear splines on these three.
+
+spline_model_names<-c("SKM (cm3)", "IMAT (whole body cm3)","SKM (whole body cm3)")
+no_spline_models<-body_cols_names[!body_cols_names %in%spline_model_names]
+
+i<-1
+lme_out<-list()
+for(this_body in body_cols_names){
+ # print(i)
+  if(this_body %in% spline_model_names){
+    if(this_body =="SKM (whole body cm3)"){
+      
+      #we want cut point at t=110 days, or 110/30=3.666667 months
+                  fixed_lme_formula<-paste("`",this_body,"` ~ ageAtMetDiag + gender + smoking+ raceEthnicity+I(pmax(times_mth-3.666667,0))", sep="")
+    }else{
+      #we want cut point at t=100 days, or 100/30=3.33333 months
+
+            fixed_lme_formula<-paste("`",this_body,"` ~ ageAtMetDiag + gender + smoking+ raceEthnicity+I(pmax(times_mth-3.333333,0))", sep="")
+    }
+
+  }else{
+      fixed_lme_formula<-paste("`",this_body,"` ~ ageAtMetDiag + gender + smoking+ raceEthnicity+times_mth", sep="")
+
+  }
+  
+    fixed_lme_formula<-formula(fixed_lme_formula)
+
+    lme_out[[i]]<-myCatch(lme(fixed_lme_formula, 
+            random = ~ times_mth | PatientID_fct, 
+            method = "ML", 
+            data = dat,
+            control =list(msMaxIter = 1000, msMaxEval = 1000)))
+
+  i<-i+1
+
+}
+names(lme_out)<-body_cols_names
+```
+
+```{r eval=FALSE}
+#| echo: FALSE
+#| warning: FALSE
+#error message generated for i=2,7,13 & 14
+lme_out[c(2,7,13,14)] #all have singular convergence issue
+#Use lme4::lmer to detect the problem
+```
+
+```{r, cache=TRUE}
+#| echo: FALSE
+#| warning: FALSE
+error_names<-body_cols_names[c(2,7,13,14)]
+#"IMAT_cm3","SKM_cm2","IMAT_whole_body_cm3","SAT_whole_body_cm3" 
+#IMAT_whole_body_cm3 should be modeled with splines 
+error_fits<-
+lapply(error_names,function(x){
+  if(x=="IMAT_whole_body_cm3"){
+    fixed_lme_formula<-paste("`",this_body,"` ~ ageAtMetDiag + gender + smoking+ raceEthnicity+I(pmax(times_mth-3.333333,0))+ (times_mth | PatientID_fct)", sep="")
+  }
+  fixed_lme_formula<-paste("`",x,"` ~ ageAtMetDiag + gender + smoking+ raceEthnicity+times_mth+ (times_mth | PatientID_fct)", sep="")
+  fixed_lme_formula<-formula(fixed_lme_formula)
+  lme4::lmer(fixed_lme_formula, data=dat)
+
+})
+# lapply(error_fits,summary)
+# #Perfect correlation between random intercept and slopes for IMAT_cm3,SKM_cm2,IMAT_whole_body_cm3
+# #Not sure what's wrong with SAT_whole_cm3.
+# summary(error_fits$SAT_whole_cm3)
+# out<-lme4::lmer(SAT_whole_body_cm3 ~ ageAtMetDiag + gender + smoking + raceEthnicity +times_mth + (times_mth | PatientID_fct), data=dat) #<- doesn't produce error....
+# out2<-nlme::lme(SAT_whole_body_cm3 ~ ageAtMetDiag + gender + smoking + raceEthnicity +times_mth ,
+#                 random = ~ times_mth | PatientID_fct,
+#                 method = "ML",
+#                 data = dat,
+#                 control =list(msMaxIter = 1000, msMaxEval = 1000)) #but this is producing error...
+# #Well, we will use lme for all fitting so for all 4 models, 
+# #we will get rid of the correlation between random intercept and slope
+
+lme_out$IMAT_cm3$result<-nlme::lme(IMAT_cm3 ~ ageAtMetDiag + gender + smoking + raceEthnicity +times_mth ,
+                            random=list(PatientID_fct = pdDiag(~ 1 + times_mth)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+                            method = "ML",
+                            data = dat,
+                            control =list(msMaxIter = 1000, msMaxEval = 1000))
+lme_out$SKM_cm2$result<-nlme::lme(SKM_cm2 ~ ageAtMetDiag + gender + smoking + raceEthnicity +times_mth ,
+                            random=list(PatientID_fct = pdDiag(~ 1 + times_mth)), 
+                            method = "ML",
+                            data = dat,
+                            control =list(msMaxIter = 1000, msMaxEval = 1000))
+lme_out$IMAT_whole_body_cm3$result<-nlme::lme(IMAT_whole_body_cm3 ~ ageAtMetDiag + gender + smoking + raceEthnicity +I(pmax(times_mth-3.333333,0)) ,
+                            random=list(PatientID_fct = pdDiag(~ 1 + times_mth)), 
+                            method = "ML",
+                            data = dat,
+                            control =list(msMaxIter = 1000, msMaxEval = 1000))
+lme_out$SAT_whole_body_cm3$result<-nlme::lme(SAT_whole_body_cm3 ~ ageAtMetDiag + gender + smoking + raceEthnicity +times_mth ,
+                            random=list(PatientID_fct = pdDiag(~ 1 + times_mth)), 
+                            method = "ML",
+                            data = dat,
+                            control =list(msMaxIter = 1000, msMaxEval = 1000))
+
+#All we need is the model fit. So get the model fit only
+lme_out<-lapply(lme_out,"[[","result")
+
+```
+
+
+```{r, cache=TRUE}
+#| echo: FALSE
+#| warning: FALSE
+#Fit baseline cox fit
+baseline_cox<-lapply(body_cols_names,function(this_body){
+    ##Cox baseline
+    cox_formula<-paste("Surv(new_OS_time_mth,new_OS_ind) ~ ",this_body,"+ageAtMetDiag+gender+smoking", sep="")
+    cox_formula<-formula(cox_formula)
+    cox.fit <- coxph(cox_formula, data=baseline_dat, x=TRUE) 
+    cox.fit
+}
+)
+
+```
+
+
+For joint model, the baseline hazard were chosen as piecewise 
+
+```{r, cache=TRUE, results="hide"}
+#| echo: FALSE
+#| warning: FALSE
+
+
+# #Fit joint model
+# joint_model<-
+# lapply(1:length(baseline_cox),function(i){
+#   #Joint modeling
+#   jointModel(lme_out[[i]], baseline_cox[[i]], timeVar = "times_mth", method = "Cox-PH-aGH", 
+#                           verbose = T) #verbose=T print out useful information if didn't converge. 
+# 
+# })
+# names(joint_model)<-names(lme_out)
+# joint_model$IMAT_cm2 |> summary()
+# 
+# test<-jointModel(lme_out[[1]], baseline_cox[[1]], timeVar = "times_mth", method = "spline-PH-GH",
+#                           verbose = T) 
+# test<-jointModel(lme_out[[1]], baseline_cox[[1]], timeVar = "times_mth", method = "Cox-PH-aGH",
+#                           verbose = T) 
+# 
+# 
+# summary(test)
+```
+
