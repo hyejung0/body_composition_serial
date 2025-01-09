@@ -1,0 +1,544 @@
+---
+title: "Longitudinal changes in body composition and its effect on survival on advanced non-small cell lung caner patients"
+format:
+  html:
+    css: aside_left_margin.css
+    #self-contained: true 
+    embed-resources: true
+    code-fold: true
+    toc: true
+execute:
+  cache: true
+editor_options:
+  chunk_output_type: console
+indent: true
+indenting: "medium"
+bibliography: references.bib
+csl: american-association-for-cancer-research.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message = FALSE,warning=FALSE)
+library(data.table)
+library(table1)
+library(ggplot2)
+library(gridExtra)
+library(purrr)
+library(ggpubr)
+library(survival)
+library(nlme)
+library(JM)
+library(nlme)
+library(survival)
+library(mice)
+library(VIM)
+
+
+
+```
+
+
+This version uses MICE results
+
+# Data
+
+We analyzed chest and abdomen CT scans to extract fat and muscle compositions of metastatic non-small cell lung cancer (mNSCLC) patients at Huntsman Cancer Institute (SLC, UT). Our previous study investigated the association between the body compositions at baseline and survival in 71 mNSCPC patients. This study is an extension of the previous study, where we analyze the association between serial body compositions and survival. Our data contains body compositions measured within 1 year of their metastatic diagnosis date.
+
+Below are exclusion criteria:
+
+-   N=65: Should have scans within 1 year of metastatic diagnosis and have scans after diagnosis Does not have any scans (6 patients did not meet this criteria)
+
+-   N=55: Have CT scans for abdomen that can be paired with chest scans. Pairing meaning that there are abdomen and chest scans within 1 week of each other (10 patients did not meet this criteria)
+
+-   N=50: Have CT scan reading with at least 2 longitudinal measurements (5 patients did not meet this criteria. Four patients didn't have any scans. One patient had only 1 scan.)
+
+Due to data discrepancy, two patients were removed because the baseline scans did not fall within (-60, +30) days since metastatic diagnosis date.
+
+Therefore, we have total 48 patients to analyze.
+
+```{r, include=FALSE}
+
+#In the original data set in non-serialized data, we started with 80 people
+
+#we excluded 8 people b/c their CT scan sit outside of -60 & +30 window of the metastatic date. Leaving us 72 samples. Excluded mrn: 21047343, 19298934, 10674422, 21180176, 21122218,  1513316, 20982783, 21045178
+
+# Further excluded 1 person due to having value 0 for Area(cm2)_SAT. Excluded mrn=3358512. Leaving us 71 samples.
+
+# Adriana sent me all scan dates (1yr after diagnosis) body. Body composition serial/Analysis/BCserial_v1/0.Data.R file
+# I found out that 6 patients didn't have any scans within 1 year of metastatic diagnosis, so I excluded them. leaving us with 65 patients. Excluded mrn:  21197586, 10909364,  2631141, 21039659, 21077824, 20467959.
+
+#I worked on paring all chest with abdomen scans of the 65 patients. 10 patinents did not have any ab + chest pair so.... Got removed. Left us with 55 patients. Excluded mrn: 7203862,  9461468, 10069565, 16185811, 17291931, 20389941, 21057136, 21060857, 21105657, 21225010 
+
+# Jeff got back to me with 51 patients only. That means that 4 patients failed image analysis.  Jeff told me that image analysis failed on 4 patients. Excluded mrn: 8234676, 16740318, 17518028, 20919028
+  # Line 37 of Body composition serial/Code/0.Data.R
+
+#One person has only one scan. I think it's just also the CT imaging failing. leaving us with 50 patient. Excluded mrn: 21115960
+   # Line 67 of Body composition serial/Code/0.Data.R
+
+#One person's metastatic date was changed by Wally during our revision of the first paper. With this revision, their baseline scan does not fall in -60 +30 window in the serialized data. So this person is removed. Leaving us with sample size of 49. Excluded mrn=20895589
+  # Line 78 of Body composition serial/Code/0.Data.R
+
+#One person's baseline scan date sits outside of -60 + 30 days. excluded. leaving us with 48 sample size. Excluded mrn =7042591. 
+  # Line 260 of Body composition serial/Code/0.Data.R file.
+
+```
+
+## Covariates
+
+We have identified age at metastatic diagnosis, gender, and race/ethnicity, BMI (kg/m2), BMI (categorical), tumor histology, and genetic mutation status as baseline covariates as the body compositions and survival may differ based on these values. Thus they are adjusted for in the body composition modeling and survival modeling.
+
+The BMI (categorical) had been originally categorized into:
+
+-   Underweight ($< 18kg/m^2$),
+
+-   Normal weight ($\geq 18kg/m^2$ & $< 25kg/m^2$),
+
+-   Overweight ($\geq 25kg/m^2$ & $< 30kg/m^2$),
+
+-   Obesity class I ($\geq 30kg/m^2$ & $< 35kg/m^2$), and
+
+-   Obesity class II ($\geq 35kg/m^2$ & $< 40kg/m^2$).
+
+However, there was only one sample for each Underweight and Obesity class II, which is not desirable for the inference purposes. Thus, Underweight and Normal weights were combined to Underweight/Normal weight, and Obesity class I and Obesity class II were combined to Obesity class I/II.
+
+
+Please note that the 1L therapy could not not be adjusted as a baseline covariate because many patients started 1L therapy +30 days after metastatic diagnosis date.
+
+
+
+\
+\
+
+# Statistical methods
+
+## Imputation
+
+*Race/Ethinicy*: Majority of the patients are White/non-Hispanic (31/49). The rest is composed of one of each Hispanic or Latino, Non-Hispanic Asian, and Other, with the rest of patients (N=15) missing race/ethnicity. Thus, we decided to combine Hispanic or Latino, Non-Hispanic Asian, Other, and patients missing race/ethnicity into one group and call it  “Other/Missing”, so that there is sufficient sample size for each group of the race/ethnicity variable. 
+
+*Body scans*: The unit of observation is measure of body scan per date per patient. That is, if a patient got chest and abdomen scan on a same day, there are two rows for the patient, one for each scan. Suppose that the chest scan was meant to capture from T1 down to L3. Similarly, suppose that the abdomen scan was supposed to capture from T11 down to L5. There is an overlap of area from T11 to L3 in the chest and abdomen scans. Then, suppose that the chest scan is missing values for T11 or T12 for some unknown reason. Then, these values can be imputed from the abdomen scan, again,if they are not missing for any reason. This step is not typically what statisticians refer to as "imputation". This is more of data wrangling, as the true value of body composition could be obtained from another observation. Once this was done, we moved on to truly what we call imputation. 
+
+At this point, any missing values in body composition come from failed imaging analysis of the CT scans. Thus, the missing mechanism missing not at random (MNAR), where the missing values depend on unobserved data, this complicates the imputation process. However, the missing body composition values can be estimated from other body compositions, as they are physiologically related to one another. Before performing this imputation, we provide number and percent missing of each variable (@fig-missing_prop and @tbl-missing_prop).
+  
+
+
+  
+```{r fig.show="hold", cache=TRUE, fig.width=14, fig.height=7}
+#| label: fig-missing_prop
+#| code-fold: true
+#| echo: false
+#| fig-cap: "Proportion of missing for each body composition used for analysis. Note that the body compositions that are generated by summing volume of each cross-section are not included in this plot."
+
+dat<-readRDS("dat_new_death_times.rds") #non-imputed data
+
+#Show number of missing
+body_cols_names<-readRDS("body_cols_names.rds")
+
+#rename it
+new_body_names<-
+  sapply(body_cols_names,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    #get rid of mid
+    pieces_x[1]<-stringr::str_remove(pieces_x[1],"mid")
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[1],pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[1],pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[1],pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x[1],pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+
+num_missing<-dat[,sapply(.SD,function(x)sum(is.na(x))), .SDcols = body_cols_names]
+prop_missing<-dat[,sapply(.SD,function(x)mean(is.na(x))), .SDcols = body_cols_names]
+
+
+miss_dat<-
+data.table("body_comp"=new_body_names,
+           "N"=num_missing,
+           "prop"=prop_missing)
+
+#order by missing proportion
+miss_dat<-miss_dat[order(prop,decreasing = T),]
+
+#Factorize for plotting
+miss_dat[,body_comp:=factor(body_comp, levels = body_comp,labels=body_comp)]
+
+library(ggplot2)
+p<-ggplot(miss_dat)+
+  geom_col(aes(x=body_comp,y=prop))+
+  theme_minimal() +  # Use a minimal theme
+  xlab("Body composition")+
+  ylab("Proportion of missing observations")
+p+theme(axis.text.x=element_text(angle = 90, hjust = 0, vjust=1))
+
+  # theme(
+  #   text = element_text(size = 14),  # Increase text size
+  #   axis.title = element_text(face = "bold"),  # Bold axis titles
+  #   axis.text = element_text(color = "black"),  # Black axis text
+  #   panel.grid.major = element_line(color = "grey80"),  # Light grey grid lines
+  #   panel.grid.minor = element_blank(),  # Remove minor grid lines
+  #   legend.position = "none"  # Remove legend
+  # ) 
+
+# # md.pattern(dat[,.SD,.SDcols=body_cols_names ])
+# 
+# # Missingness pattern can also be visualised in VIM package by
+# dat_aggr <- aggr(dat, col=mdc(1:length(body_cols_names)), numbers=TRUE, prop = TRUE,sortVars=TRUE, labels=new_body_names, cex.axis=.7, gap=3, ylab=c("Proportion of missingness","Missingness Pattern"))
+
+```
+  
+  
+```{r, cache=TRUE}
+#| echo: FALSE
+#| label: tbl-missing_prop
+#| tbl-cap: "N (%) of missing proportion of body compositions."
+
+#Table of missing proportion
+miss_dat[,percent:=prop*100]
+miss_dat[,`N (%)`:=sprintf("%.0f (%0.2f%%)", N, percent)]
+setnames(miss_dat,"body_comp","Body Composition")
+knitr::kable(miss_dat[,.(`Body Composition`, `N (%)`)])
+setnames(miss_dat,"Body Composition","body_comp")
+
+miss_dat<-data.frame(miss_dat, check.names = F)
+```
+  
+The body compositions missing the most observations are `r miss_dat$body_comp[1]` and `r miss_dat$body_comp[2]`, with missing `r miss_dat[1,c("N (%)")]` observations. 
+
+Also, the total number of observations missing at least one variable for fitting models we need to fit is approximately 49%. Because of that, we employed 49 multiple imputations [@WhiteIanR.2011Miuc; @BodnerToddE.2008WIwI] to ensure convergence of not only the point estimates, but also the standard errors of the point estimates. We used chained equations (`mice` package) with predictive mean matching (pmm) method.
+
+::: aside
+White et al. (2010), assuming the true FMI for any variable would be less than or equal to the percentage of cases that are incomplete, uses the rule that m should equal the percentage of incomplete cases. Thus if the FMI for a variable is 20% then you need 20 imputed datasets. A similar analysis by Bodner, 2008 makes a similar recommendation. White et al., 2010 also found when making this assumption, the error associated with estimating the regression coefficients, standard errors and the resulting p-values was considerably reduced and resulted in an adequate level of reproducibility.
+:::
+
+
+We initially tried to impute using linear mixed effect model. However, the estimating process generated singular fits even when only the body composition variables and patient identifiers were used for imputation, necessitating changing  to a simpler model (pmm). 
+
+\
+\
+
+
+## Models
+
+::: img-float
+![](spine_image.jpeg){style="float: left; margin: 5px; width: 300px;"}
+:::
+We aim to model the changes in body composition (a longitudinal outcome) and its impact on the risk of death (a survival outcome) in metastatic advanced non-small cell lung cancer (mNSCLC) patients.
+
+Initially, we assessed the association between body composition at baseline (using the first CT scan) and the risk of death. This approach evaluated the potential of body composition metrics as biomarkers of disease progression and survival in mNSCLC patients. However, disease progression varies not only between patients but also dynamically over time within the same patient. Consequently, the full potential of a biomarker in describing disease progression and its association with survival can only be revealed through repeated measurements over time @RizopoulosDimitris2012JMfL. To address this, we collected body composition data from the date of metastatic diagnosis up to one year after diagnosis.
+
+A straightforward approach might involve modeling the longitudinal body composition using a linear mixed-effects model and the survival outcome using a time-dependent Cox model. However, this approach has limitations. Specifically, the time-dependent Cox model assumes the covariate to be "external," meaning that the body composition at time point $t$ is not affected by death at time point $u$, with $t >u$ @KalbfleischJohnD2011TSAo. This assumption is not satisfied for our case. Progression towards death (declining health) can impact the body composition before death.  As patients progress toward death, their declining health can influence body composition through physiological changes such as muscle and fat wasting, decreased appetite, and metabolic dysregulation—hallmarks of terminal illnesses like cancer cachexia or end-stage organ failure. Furthermore, body composition measurements cease after death, introducing a censoring mechanism that reflects a practical limitation rather than a causal relationship. These considerations render body composition an "internal" covariate for the survival outcome, violating the assumptions of the time-dependent Cox model.
+
+Given that both longitudinal body composition and the hazard of death are stochastic processes influenced by underlying patient-specific factors and interact with each other, joint modeling provides a more appropriate framework. By simultaneously modeling these processes, we can better capture their dynamic association and the interplay between disease progression and survival outcomes.
+
+The joint modeling framework requires the specification of a longitudinal submodel to describe the changes of body composition over time and a survival submodel to risk of death. These two submodels are linked to capture the dynamic interplay between the longitudinal and survival processes. Below, we provide a brief explanation of the formulation and integration of these submodels.
+
+
+
+
+### Survival submodel 
+
+The aim is to measure association between the longitudinal body composition and the risk for death (or survival probability), while accounting for the special features of the former. To achieve this, we introduce the term $m_i(t)$ that denotes the true and unobserved value of the longitudinal outcome at time $t$. The observed body composition over time is $m_i(t)$ plus a measurement error.
+
+The survival model can be either Cox model or AFT model. In either the Cox model, or AFT model, the information $m_i(t)$ is provided as an adjusting variable at each death time $t$. We will initially begin modeling with a Cox model with unspecified baseline risk function to allow maximum flexibility in underlying risk model. However, the unspecified baseline risk function may require many death events to for estimation. If this approach causes estimation error, we will change to piecewise-constant baseline risk function. Note that setting internal number of knots to the number of deaths makes piecewise-constant the same as the unspecified baseline risk function.
+
+::: aside
+Or we may change to accelerated failure time (AFT) model. The perks of using AFT instead Cox PH model is that the subject-specific risk at time $t$ depends on the entire body composition history up to time $t$, whereas for the Cox PH model, the subject-specific risk depends only on the current value of the body composition.
+:::
+
+
+### Longitudinal Submodel
+
+We need the true body composition $m_i(t)$ for each time point $t$, where death occurs. We do not have this value, so we reconstruct the complete longitudinal history using the observed values ($y_i(t)$). As briefly mentioned, we assume that $y_i(t) = m_i(t) + \epsilon_i(t)$. Thus, $m_i(t)$ can be identified by fitting a longitudinal model and predicting the value at $t$ of interest. 
+
+For our analysis, we decided to use linear mixed models (LMMs) for simplicity. Given that we are examining 16 different body compositions, we fit 16 separate LMMs. For each body composition, we adjust for age at metastatic diagnosis, gender, smoking history, race ethnicity and longitudinal effect of age. The longitudinal effect of age is modeled by visually examining its marginal association with the body composition over time using scatter plots. Time zero represents baseline age, and the subsequent observations, marked by time in years, reflect the increase in age since the baseline. Similarly, the decision of random intercept and slope for time will be determined after visually examining the marginal assocation via scatter plots. 
+
+
+
+## Inference
+
+With 49 imputed dataset, we use Ruben's pooling rule @RubinDonaldB1987MIfN to estimate parameters. The sample size required to estimate statistic for Ruben's rule will assume total obervation number even for linear mixed model, even though we have multiple observations from the same patients. 
+
+\
+\
+
+# Results
+
+## baseline data
+
+@tbl-tab1 provides a descriptive summary of all baseline variables before and after imputation. The descriptive summary before imputation is shown under "Raw data (N=48)" column, and after imputation is shown under "Imputed data (N=48)" column. Note that the summaries are the same between the two data for all variables the same until body composition as they are not missing any values. Only the body compositions were imputed. Thus, no other cells are filled with number.
+
+```{r, cache=TRUE}
+#| echo: FALSE
+#| label: tbl-tab1
+#| tbl-cap: "Descriptive summary of the covariates and body composition at the baseline. 49 imputations were performed using predictibe mean matching method with MICE package."
+
+t1_out_comb<-readRDS("t1_out_comb.rds")
+knitr::kable(t1_out_comb,row.names = F) |> 
+  footnote(general=c("whole body (cm3) refers to sum of all volumns (cm3) from T1 to Sacrummid")) 
+```
+
+\
+
+Surprisingly, many patients have normal to overweight BMI at the baseline. These are the mNSCLC patients, so I assumed that they would be physically more fragile, as described by Wally. Maybe most of our patients were very early stage of the metastatic state at the baseline?
+
+
+
+We first provide results from separate longitudinal and survival modeling, before fitting the joint model. We will then compare how the estimates from these separate modelings are different/similar to the estimates from the joint modeling framework.
+
+
+
+## Separate Cox Modeling
+
+
+```{r cache=TRUE}
+#| echo: FALSE
+
+#generate median survival time data
+dat_raw<-readRDS("dat_new_death_times.rds") 
+dat_raw[,is_baseline:=0]
+dat_raw[times==0,is_baseline:=1]
+baseline_dat<-dat_raw[is_baseline==1,]
+fit1 <- survfit(Surv(new_OS_time_yr, new_OS_ind) ~ 1, data = baseline_dat)
+summary_fit1<-summary(fit1)$table
+# source("survfit_median_CI.R")
+# survfit_median_CI(fit1)
+
+```
+
+```{r cache=TRUE}
+#| label: fig-KMplot
+#| fig-cap: "Kaplan-Meier curve demonstrating survival probability over time (months)."
+#| warning: FALSE
+#| echo: FALSE
+
+#Kaplan meier curve
+source("return_km_plot.R")
+
+km_plot<-return_km_plot(data = baseline_dat, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" )
+
+#Remove legend
+# Assuming your plot is saved as 'x'
+km_plot$plot <- km_plot$plot + theme(legend.position = "none")
+km_plot
+```
+
+
+@fig-KMplot shows Kaplan Meier survival plot. The median time to death of patients were `r sprintf("%.2f",summary_fit1["median"])` year (95% confidence interval: `r sprintf("%.2f",summary_fit1["0.95LCL"])` – `r sprintf("%.2f",summary_fit1["0.95UCL"])`) since the metastatic diagnosis. 
+
+@tbl-cox_naive shows the hazard ration (95% confidence interval) of all variables used in the Cox model. These estimates were calculated ignoring the potential effect of survival process on the body composition. Note that we did not adjust for multiple testing as this is not our final model. IMAT (cm3), SAT (mean HU), VAT (mean HU), and SAT (whole body cm3) are associated with survival. Of these, only SAT (whole body cm3) were found to be negatively associated with death. That is, higher SAT (whole body cm3) value is associated with decreased risk of death. The three other variables showed opposite associations and that is not what we had expected.
+
+
+
+
+
+```{r, cache=TRUE}
+#| echo: false
+#| warning: false
+#| message: false
+#| label: tbl-cox_naive
+#| tbl-cap: "Hazard ratio (95% confidence interval) of body compositions and covariates. The time-dependent Cox model is fit."
+
+HR.dt<-readRDS("separate_cox_HR.dt.rds")
+
+
+library(kableExtra)
+library(knitr)
+knitr::kable(HR.dt) |> 
+  footnote(symbol=c("p-value<=0.5")) 
+
+
+```
+
+
+
+
+\
+
+## Separate Longitudinal modeling
+
+We first provide longitudinal plot of body compositions in @fig-hist_all. As there are 49 imputed data, we averaged out the 49 values for each observation for plotting purposes. In each plot, the observed data points of the body composition are plotted with black dots over time, and the dots belonging to a same patient are connected with a grey line. Additionally, the red curve represent a relationship between each body composition over time for all patient samples in smooth curve (natural splines with 3 degrees of freedom). The grey area around the red line represent standard error of the red line. Most of the body compositions show linear pattern and do not seem to change over time on average. 
+
+The only body compositions whose change over time deviate from a single linear slope are IMAT (whole body cm3) and SKM (whole body cm3). The IMAT (whole body cm3) has a steep decrease at time 0.25, which is equivalent to about 3 months after the metastatic diagnosis, and then seems to remain the same afterward. That is, many patients loses intermuscular adipose tissue volumes (from chest to abdomen) in the first 3 months and seem to maintain for the rest of the year. On the other hand, many patients seem to gain skeletal muscle volume in the first 3 months and maintain the same. This is a pattern that we did not expect to observe. 
+
+Also note that even though not as obvious as these two body compositions, IMAT (cm2), IMAT (mean HU), SAT (cm2), and VAT (mean HU) also show some changes to slope at time=0.25. Thus, we will model piecewise linear slope on time at t=0.25 for these four body compositions along with the two we have noted above. All other body compositions will be modeled with a single linear slope over time.  
+
+
+
+```{r cache=TRUE, include=FALSE}
+#| echo: false
+
+#generate longitudinal plot
+
+library(ggplot2)
+library(gridExtra)
+library(zoo)
+
+mice_dat<-readRDS("mice_dat.rds")
+
+
+#save column names
+dat_dict<-fread("../Documents/variables_dictionary.csv",na.strings = c("", NA))
+dat_dict<-na.locf(dat_dict)
+body_cols_names<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
+body_cols_names<-stringr::str_replace_all(body_cols_names,";","__")
+body_cols_names<-c(body_cols_names,stringr::str_subset(colnames(mice_dat[[1]]),"whole"))
+
+mice_dat<-
+  lapply(mice_dat,function(dat){
+    dat[,PatientID_fct:=factor(PatientID)] #Must change to factor to use in my regression as random effect. 
+  })
+
+mice_dat_combine<-do.call(rbind,mice_dat)
+mice_dat_combine[,imputation:=rep(1:49,each=201)] #we had 49 imputations, and the complete dataset has nrow=201
+
+#Average out the point. For each patient and times_yr point, we will average out the body composition over 49 imputations
+mice_dat_combine<-mice_dat_combine[,lapply(.SD,mean),by=.(mrn,times_yr),.SDcols = body_cols_names]
+
+
+
+
+body_cols_pretty<-
+  sapply(body_cols_names,function(x){
+    
+    pieces_x<-strsplit(x,"__")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+
+all_plots<-
+  lapply(1:length(body_cols_names),function(i){
+    
+    name_x<-body_cols_names[i]
+    pretty_x<-body_cols_pretty[i]
+    ggplot(data=mice_dat_combine)+
+      geom_point(aes(x=times_yr, y=.data[[name_x]],group = mrn)) +
+      geom_line(aes(x=times_yr, y=.data[[name_x]],group = mrn), alpha=0.2)+
+      stat_smooth(
+        data=mice_dat_combine,
+        mapping=aes(x=times_yr, y=.data[[name_x]]),
+        geom="smooth",
+        method="lm",
+        formula=y~ splines::ns(x,df=3),
+        col="red")+
+      ylab(pretty_x)+
+      xlab("Time (year)")
+  
+    
+  })
+```
+
+
+
+```{r fig.show="hold", cache=TRUE, fig.width=8, fig.height=24}
+#| label: fig-hist_all
+#| code-fold: true
+#| echo: FALSE
+#| fig-cap: "Longitudinal plot of body composition over time (year)."
+
+
+combined_plot <- ggarrange(
+  all_plots[[1]], all_plots[[2]], 
+  all_plots[[3]], all_plots[[4]],
+  all_plots[[5]], all_plots[[6]],
+  all_plots[[7]], all_plots[[8]],
+  all_plots[[9]], all_plots[[10]],
+  all_plots[[11]], all_plots[[12]],
+  all_plots[[13]], all_plots[[14]],
+  all_plots[[15]], all_plots[[16]],
+  ncol = 2, nrow = 8)
+print(combined_plot)
+```
+
+
+The table @tbl-serparate_long_model shows the monthly changes in body composition. For body compositions modeled using piecewise linear time effects, the impact is reflected in both the first and second columns. Otherwise, the first column alone provides the relevant estimates.
+It is important to note that most estimates were assumed to follow a t-distribution due to small sample size. However, we still employed Rubin's rule for pooling the estimates across all imputed data sets. Rubin's rule require the estimates to follow normal distribution. Thus, y assuming that the imputed estimates are normally distributed, we may overstate the statistical significance of the observed quantities. Meaning, we increase the type 1 error rate. However, in each LME model, the degrees of freedom for `times_yr` and `I(pmax(0, times_yr - 0.25))` are approximately 150, which closely resembles normal distribution.
+
+Note that IMAT (mea HU), SAT (cm2), SKM (cm2), VAT (mean HU), IMAT (whole body cm3), and SKM (whole body cm3) had too small sample sizes to repliably estimate random effects. To address this limitation, a simplified model was employed where the variance components were allowed to vary, but the off-diagonal components of the covariance matrix were fixed.
+
+To illustrate the interpretation of the table, consider the results for intermuscular adipose tissue area (cm²). This body composition allowed for different slopes in `times_yr` before and after 3 months. Before three-months mark,  intermuscular adipose tissue area decreased steadily at a rate of 0.57 cm2 (95%CI: -0.96 - 0.17)per month. After the three-month period, however, a reversal was observed, with adipose tissue area increasing by approximately 0.75 cm2 (95%CI: 0.26 - 1.23) per month.
+
+For skeletal muscle volume (cm³), time was modeled linearly without allowing for differential slopes over time intervals. The analysis revealed that skeletal muscle volume increased by 1.32 cm3 (95%CI: 0.97 - 1.66) per month throughout the study period.
+
+Focusing on statistically significant effects (marked by *), the data do not support a consistent pattern of decreasing body composition over time, which had been the initial hypothesis. Instead, some body compositions demonstrated an increase after the three-month period.
+
+```{r, cache=TRUE}
+#| echo: false
+#| warning: false
+#| message: false
+#| label: tbl-serparate_long_model
+#| tbl-cap: "Change in body composition (95% confidence interval) for every month. Estimates from the separate longitudinal fitting."
+
+lme_out_0_stats_ci<-readRDS("lme_out_0_stats_ci.rds") 
+
+
+library(kableExtra)
+library(knitr)
+knitr::kable(lme_out_0_stats_ci,row.names = T) |> 
+  footnote(symbol=c("p-value<=0.5")) 
+
+
+```
+  
+
+## Join modeling?
+
+
+
+We initially posited that joint modeling would be necessary, as the death process could potentially influence the trajectory of body composition. This is the important if the longitudinal measurements were measured until death occurs. But this was not the set up of our study. Our focus was specifically on body composition within the first year after diagnosis and its potential impact on survival outcomes. This emphasis on the first year was informed by clinical insights, suggesting that body compositions during the first year after diagnosis of metastatic non-small cell lung cancer (mNSCLC) are critical predictors of future mortality.
+
+The study's context clarifies the relationship between body composition and death. If most patients died within the first year of diagnosis, it would have been impossible to comprehensively observe body composition throughout the year for all individuals. Conversely, if most patients survived beyond the first year, all body composition data within that period would have been fully observed and unaffected by the death process. Thus, in the latter case, the absence of death within the first year would ensure that body composition trajectories were not influenced by mortality during the observation window. 
+
+So! Let's check our dataset. When did peopple die?
+
+```{r include=FALSE, eval=FALSE}
+
+#check time to death
+dat_raw<-readRDS("dat_new_death_times.rds") #non-imputed data
+library(data.table)
+tmp<-dat_raw[,max_times_yr:=max(times_yr),by=PatientID]
+tmp<-tmp[times_yr==max_times_yr,]
+
+hist(tmp$new_OS_time_yr)#Most death occur after 1 year I think
+mean(tmp$new_OS_time_yr<1) #34% of all dataset are before 1 year.. did they die?
+
+tmp[new_OS_time_yr<1,table(new_OS_ind)] #all died.. Okay fine  
+
+#Are the death time close to the last scan date?
+tmp[,scan_to_death:=new_OS_time_yr-max_times_yr]
+#change to days
+tmp[,scan_to_death:=scan_to_death*365]
+
+tmp[new_OS_time_yr<1,.(max_times_yr,new_OS_time_yr,scan_to_death)]
+
+tmp[new_OS_time_yr<1,summary(scan_to_death)]
+#So for all those who died before 1 year, number of days from the last scan until death ranges anywhere between 2 to 170 days, with median of 39 days. 
+```
+
+Okay. In the above code, I see that we have 34% of all patients experiencing death within 1st year, and the days between the last scan and death ranges from 2 to 170 days. So I think it's fair to say that at least for patients whose death were observed relatively soon after their last scan dates, the "missingness" (no longer observing CT scans) was due to death. 
+
+We will have to do joint modeling.
