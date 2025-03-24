@@ -1,0 +1,2192 @@
+---
+title: "(Result) Association between logitudinal body composition and survival in metastatic non-small cell lung cancer patients"
+subtitle: "version 4"
+date: today
+format:
+  html:
+    css: aside_left_margin.css
+    #self-contained: true 
+    embed-resources: true
+    code-fold: true
+    toc: true
+    number-sections: true
+execute:
+  cache: true
+editor_options:
+  chunk_output_type: console
+indent: true
+indenting: "medium"
+bibliography: references.bib
+csl: nature.csl
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message = FALSE,warning=FALSE)
+library(data.table)
+library(table1)
+library(ggplot2)
+library(gridExtra)
+library(purrr)
+library(ggpubr)
+library(survival)
+library(survminer)
+library(qvalue)
+library(nlme)
+library(JM)
+library(nlme)
+library(mice)
+library(VIM)
+library(knitr)
+library(kableExtra)
+library(zoo)
+library(flextable)
+library(gt)
+```
+
+
+
+
+# Result
+
+## Impute with mean {.hidden .unlisted .unnumbered}
+
+```{r}
+#| include: false
+#| eval: true
+#| warning: false
+
+#Impute data with mean
+#SAVE IT
+
+#Read in data
+dat_raw<-readRDS("dat_new_death_times.rds")
+
+#data dictionary
+dat_dict<-readRDS("dat_dict.rds")
+dat_dict<-na.locf(dat_dict)
+
+exclude_for_composite<-readRDS("exclude_for_composite.rds")#<-patients to exclude for imputing raw BC for composite BC. From SAP
+
+
+
+#Extract columns for each types of body composition
+#"IMAT- Whole abdomen + chest volume  (sum of these variables)"
+IMAT_ab_chest_cols<-dat_dict[`Variable Category`=="IMAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"SAT- Whole abdomen + chest volume  (sum of these variables)"
+SAT_ab_chest_cols<-dat_dict[`Variable Category`=="SAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"SKM- Whole abdomen + chest volume  (sum of these variables)"
+SKM_ab_chest_cols<-dat_dict[`Variable Category`=="SKM- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"VAT- Whole abdomen + chest volume  (sum of these variables)"
+VAT_ab_chest_cols<-dat_dict[`Variable Category`=="VAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+
+raw_col_names<-list(
+  IMAT=IMAT_ab_chest_cols,
+  SAT=SAT_ab_chest_cols,
+  SKM=SKM_ab_chest_cols,
+  VAT=VAT_ab_chest_cols
+)
+
+
+
+
+
+
+#For any original body composition variable, impute with mean
+original_body_comp_cols<-stringr::str_subset(colnames(dat_raw),"L3")
+#Impute mean
+tmp1<-copy(dat_raw)
+for(x in original_body_comp_cols){
+  #find mean for each person
+  tmp1[,mean_var:=mean(get(x), na.rm=T), by=mrn]
+  #If all observations are missing then we get NaN for mean_var. We don't want to do that.
+  tmp1[is.na(mean_var),mean_var:=as.numeric(NA)]
+  tmp1[is.na(get(x)),(x):=mean_var]
+}
+tmp1[,sapply(.SD,function(x)sum(is.na(x))),.SDcols = original_body_comp_cols]
+#good ! nothing missing now.
+
+#Save the data
+tmp1<-tmp1[,.SD,.SDcols = c(stringr::str_subset(colnames(tmp1),";",negate=T),original_body_comp_cols)]
+saveRDS(tmp1,"original_impute_dat.rds")
+
+
+
+
+
+#For composite body compositions, 
+#Exclude the two patients found to miss the whole scans
+
+tmp<-copy(dat_raw)
+#Exclude the the patients
+tmp<-tmp[!mrn %in%exclude_for_composite,]
+
+all_imputed_raw_for_composite<-
+lapply(raw_col_names,function(one_composite){
+  
+  tmp2<-copy(tmp)
+  for(x in one_composite){
+    #find mean for each person
+    tmp2[,mean_var:=mean(get(x), na.rm=T), by=mrn]
+    #If all observations are missing then we get NaN for mean_var. We don't want to do that.
+    tmp2[is.na(mean_var),mean_var:=as.numeric(NA)]
+    tmp2[is.na(get(x)),(x):=mean_var]
+    
+  }
+  tmp2
+})
+all_imputed_raw_for_composite$IMAT[,sapply(.SD,function(x)sum(is.na(x))),.SDcols = raw_col_names$IMAT]
+all_imputed_raw_for_composite$SAT[,sapply(.SD,function(x)sum(is.na(x))),.SDcols = raw_col_names$SAT]
+all_imputed_raw_for_composite$SKM[,sapply(.SD,function(x)sum(is.na(x))),.SDcols = raw_col_names$SKM]
+all_imputed_raw_for_composite$VAT[,sapply(.SD,function(x)sum(is.na(x))),.SDcols = raw_col_names$VAT]
+#good. No missing data.
+#Now sum up. 
+imputed_IMAT_whole<-apply(all_imputed_raw_for_composite$IMAT[,.SD,.SDcols = raw_col_names$IMAT],1,sum)
+imputed_SAT_whole<-apply(all_imputed_raw_for_composite$SAT[,.SD,.SDcols = raw_col_names$SAT],1,sum)
+imputed_SKM_whole<-apply(all_imputed_raw_for_composite$SKM[,.SD,.SDcols = raw_col_names$SKM],1,sum)
+imputed_VAT_whole<-apply(all_imputed_raw_for_composite$VAT[,.SD,.SDcols = raw_col_names$VAT],1,sum)
+
+
+
+tmp<-tmp[,.SD,.SDcols = stringr::str_subset(colnames(tmp),";",negate=T)]
+tmp[,IMAT_whole_cm3:=imputed_IMAT_whole]
+tmp[,SAT_whole_cm3:=imputed_SAT_whole]
+tmp[,SKM_whole_cm3:=imputed_SKM_whole]
+tmp[,VAT_whole_cm3:=imputed_VAT_whole]
+
+#Save the data
+saveRDS(tmp,"composite_impute_dat.rds")
+
+```
+
+
+
+
+## Descriptive summary at baseline {#sec-baseline-data}
+
+
+@tbl-tab1 shows the descriptive summary of variables at baseline after imputation.
+
+```{r}
+#| eval: true
+#| echo: false
+#| warning: false
+#| label: tbl-tab1
+#| tbl-cap: Summary of Patient Characteristics at Baseline.
+
+
+
+# Generate table 1 for both original and composite body compositions 
+
+#read in data
+composite<-readRDS("composite_impute_dat.rds")
+original<-readRDS("original_impute_dat.rds")
+
+
+
+#Save column names of body compositions of interest
+dat_dict<-readRDS("dat_dict.rds")
+dat_dict<-na.locf(dat_dict)
+body_cols<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
+body_cols<-c(body_cols,stringr::str_subset(colnames(composite),"whole"))
+
+
+#generate pretty names 
+body_cols_pretty<-
+  sapply(body_cols,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+
+
+#make it a list for table label
+body_cols_pretty_tbl<-as.list(body_cols_pretty)
+for(i in 1:length(body_cols_pretty_tbl)){
+  names(body_cols_pretty_tbl[[i]])<-body_cols[i]
+}
+
+#append the covariate names
+body_cols_pretty_tbl<-
+c(body_cols_pretty_tbl,
+  list(
+        ageAtMetDiag="Age at Metastatic Diagnosis (years)",
+              gender="Gender"
+      )
+  )
+names(body_cols_pretty_tbl$ageAtMetDiag)<-"ageAtMetDiag"
+names(body_cols_pretty_tbl$gender)<-"gender"
+
+library(gtsummary)
+
+return_tab_1<-function(dat, vars,this.label=NULL,footnote=NULL){
+  #dat: data.table
+  #vars: vector of columns in dat to summarize
+  #footnote : string to add for dootnote
+  #this.label : a list of character vector, each vector having a name as it appear in dat, and the entry, which is the label the user want to print out
+  
+  #Just use the baseline data
+  tmp<-copy(dat)
+  tmp[,is_baseline:=0]
+  tmp[times==0,is_baseline:=1]
+  tmp<-tmp[is_baseline==1,]
+  
+  tmp<-unique(tmp,by=c("PatientID",vars))
+
+
+  out<-
+    tbl_summary(
+      data=tmp[,.SD,.SDcols=vars],
+      label=this.label,
+      type = list(where(is.numeric) ~ "continuous2"),  # Use "continuous2" for multiple statistics
+      statistic = list(
+        all_continuous() ~ c("{mean} ({sd})", "{median} ({p25}, {p75})")  # Show both Mean (SD) and Median (Q1, Q3)
+      )
+    )
+  return(out)
+  
+}
+
+original_baseline_table<-return_tab_1(dat = original,vars = c("ageAtMetDiag","gender",stringr::str_subset(colnames(original),";")), this.label = body_cols_pretty_tbl)
+
+composite_baseline_table<-return_tab_1(dat = composite,vars = c("ageAtMetDiag","gender",stringr::str_subset(colnames(composite),"whole")),footnote = 'Note: "whole body cm3" refers to sum of all volumns (cm3) from T1 to Sacrummid.', this.label = body_cols_pretty_tbl)
+
+
+merged_tbl <- tbl_merge(list(original_baseline_table, composite_baseline_table), tab_spanner = c("Original", "Composite"))
+merged_tbl |> 
+  modify_footnote(
+    all_stat_cols() ~ "mean (SD) and median (25th, 75th percentile) for continous variables; n (%) for categorical variables."
+  ) #|> 
+  #modify_caption("**Table 1: Summary of Patient Characteristics**")
+
+
+
+
+#Below is a function for table 1 if I just run 1 dataset. 
+#this is usually what I do.
+
+# #Function for table 1
+# my.render.cont <- function (x, ...) 
+# {
+#   with(stats.default(x), 
+#        c("",  `Mean (SD)` = sprintf("%.2f (%.2f)", MEAN, SD), 
+#          `Median [Min, Max]` = sprintf("%.2f [%.2f, %.2f]", MEDIAN, MIN, MAX)
+#          )
+#        )
+# }
+# 
+
+# covar_cols<-c("ageAtMetDiag"="Age at Metastatic Diagnosis",
+#               "gender"="Gender" )
+# 
+
+
+
+
+
+
+#For the raw data, we didn't generate the sum of variables
+#because I didn't know how to generate if there are any missing. 
+#Let's check
+
+
+# return_tab_1<-function(dat, vars,footnote=NULL){
+#   #dat: data.table
+#   #vars: vector of columns in dat to summarize
+#   #footnote : string to add for dootnote
+#   
+#   #Just use the baseline data
+#   tmp<-copy(dat)
+#   tmp[,is_baseline:=0]
+#   tmp[times==0,is_baseline:=1]
+#   tmp<-tmp[is_baseline==1,]
+# 
+#   tmp<-unique(tmp,by=c("PatientID",vars))
+#   cat("Maximum repetition of patient in baseline data is ",max(table(tmp$mrn),". \n"))
+#   
+#   my_formula<-paste("`",vars,"`", sep="")
+#   my_formula<-paste(my_formula,collapse = "+")
+#   my_formula<-paste("~",my_formula)
+#   my_formula<-as.formula(my_formula)
+#   if(is.null(footnote)){
+#       t1_out<-table1(my_formula, 
+#                render.continuous=my.render.cont, 
+#                data = tmp)
+#   }else{
+#       t1_out<-table1(my_formula, 
+#                render.continuous=my.render.cont, 
+#                data = tmp,
+#                footnote = 'Note: "whole body cm3" refers to sum of all volumns (cm3) from T1 to Sacrummid.')
+#   }
+# 
+#   return(t1_out)
+# 
+# }
+# 
+# original_baseline_table<-return_tab_1(dat = original,vars = c(names(covar_cols),stringr::str_subset(colnames(original),";")))
+# 
+# composite_baseline_table<-return_tab_1(dat = composite,vars = c(names(covar_cols),stringr::str_subset(colnames(composite),"whole")),footnote = 'Note: "whole body cm3" refers to sum of all volumns (cm3) from T1 to Sacrummid.')
+
+
+
+```
+
+
+
+\
+
+## Simple Analysis
+
+### baseline age and body composition
+
+We will first estimate association at baseline and age using Spearman correlation in a table (@tbl-baseline_age_corr) and figures (@fig-baseline_age_bc). We do this to see if our data supports age as a confounder between body composition and time according to Ann. But I think it could be a bit misleading. We are looking at a cross sectional value of each scan over many patients. 
+
+
+```{r}
+#| eval: true
+#| echo: false
+#| label: tbl-baseline_age_corr
+#| tbl-cap: Spearman correlation between body composition and age at baseline. The table is sorted from the greatest correlation to smallest from top to bottom.
+
+
+#Baseline age and body composition correlations table 
+
+#read in data
+composite<-readRDS("composite_impute_dat.rds")
+original<-readRDS("original_impute_dat.rds")
+
+#Generate combine dataset using baseline only.
+original_baseline<-copy(original)
+original_baseline[,is_baseline:=0]
+original_baseline[times==0,is_baseline:=1]
+original_baseline<-original_baseline[is_baseline==1,]
+
+composite_baseline<-copy(composite)
+composite_baseline[,is_baseline:=0]
+composite_baseline[times==0,is_baseline:=1]
+composite_baseline<-composite_baseline[is_baseline==1,]
+
+
+#Save column names of body compositions of interest
+dat_dict<-readRDS("dat_dict.rds")
+dat_dict<-na.locf(dat_dict)
+body_cols<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
+body_cols<-c(body_cols,stringr::str_subset(colnames(composite_baseline),"whole"))
+
+
+#generate pretty names 
+body_cols_pretty<-
+  sapply(body_cols,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+
+
+#Calculate spearman correlation
+baseline_age_cor<-
+sapply(body_cols,function(this_body){
+  
+  if(stringr::str_detect(this_body,"whole")){
+      cor(x=composite_baseline$ageAtMetDiag,
+      y=composite_baseline[,..this_body],
+      method="spearman",
+      use="pairwise.complete.obs"
+        )
+  }else{
+      cor(x=original_baseline$ageAtMetDiag,
+      y=original_baseline[,..this_body],
+      method="spearman",
+      use="pairwise.complete.obs"
+        )
+  }
+
+})
+
+spearman_dt<-
+data.table(
+  "Body composition"=body_cols_pretty,
+  "Spearman correlation with age"=baseline_age_cor
+)
+#Sort the data by absolute value of correlation
+spearman_dt<-spearman_dt[order(abs(`Spearman correlation with age`), decreasing = T)]
+
+
+
+library(kableExtra)
+library(knitr)
+knitr::kable(spearman_dt) 
+
+
+```
+
+
+
+```{r fig.show="hold", cache=TRUE, fig.width=8, fig.height=24}
+#| label: fig-baseline_age_bc
+#| eval: true
+#| echo: FALSE
+#| warning: false
+#| fig-cap: Association between baseline body composition and age. Spearman correlations and its p-values are aslo printed. Don't seem to be having much assocation at the baseline.
+
+
+#Plot body composition and age at baseline, in the order same as the spearman_dt. 
+
+
+#Get the body composition in the order
+body_cols_pretty_flip<-names(body_cols_pretty)
+names(body_cols_pretty_flip)<-body_cols_pretty
+plot_order<-body_cols_pretty_flip[spearman_dt$`Body composition`]
+
+baseline_age<-
+lapply(plot_order,function(this_body){
+    if(stringr::str_detect(this_body,"whole")){
+    ggplot(composite_baseline,mapping = aes(x=ageAtMetDiag, y=.data[[this_body]]))+
+    geom_point()+
+    ylab(body_cols_pretty[this_body])+
+    xlab("Age at diagnosis")+
+    stat_cor(method="spearman")
+    }else{
+    ggplot(original_baseline,mapping = aes(x=ageAtMetDiag, y=.data[[this_body]]))+
+    geom_point()+
+    ylab(body_cols_pretty[this_body])+
+    xlab("Age at diagnosis")+
+    stat_cor(method="spearman")
+    }
+
+})
+
+
+
+combined_baseline_age <- ggpubr::ggarrange(
+  baseline_age[[1]], baseline_age[[2]],
+  baseline_age[[3]], baseline_age[[4]],
+  baseline_age[[5]], baseline_age[[6]],
+  baseline_age[[7]], baseline_age[[8]],
+  baseline_age[[9]], baseline_age[[10]],
+  baseline_age[[11]], baseline_age[[12]],
+  baseline_age[[13]], baseline_age[[14]],
+  baseline_age[[15]], baseline_age[[16]],
+  ncol = 2, nrow = 8)
+
+# combined_baseline_age <- ggpubr::ggarrange(
+#   baseline_age[[1]], baseline_age[[2]],
+#   baseline_age[[3]], baseline_age[[4]],
+#   baseline_age[[5]], baseline_age[[6]],
+#   baseline_age[[7]], baseline_age[[8]],
+#   baseline_age[[9]], baseline_age[[10]],
+#   baseline_age[[11]], baseline_age[[12]],
+#   ncol = 2, nrow = 6)
+
+
+print(combined_baseline_age)
+
+
+
+### Below doesn't work properly. stat_cor with facet doesn't work
+# baseline_dat_long<-melt(baseline_dat, id.vars = c("ageAtMetDiag"), measure.vars = body_cols_names, variable.name = "Body_composition", value.name = "measruement")
+# 
+#   ggplot(baseline_dat_long,mapping = aes(x=ageAtMetDiag, y=Body_composition))+
+#     geom_point()+
+#     facet_wrap(~Body_composition, ncol=2,scales="free")+
+#     stat_cor(method="spearman")
+
+```
+
+
+\
+
+### Simple longitudinal plot {#sec-simple_long_plot}
+
+@fig-longitudinal_plots show plots of the body compositions over time. General trends are all increasing right after metastatic diagnosis (time zero) except for IMAT (cm2) and SAT (cm2). Yet, even these two body compositions increase approximately after 0.25 year (3 months). However, we see varying intercept and slopes in patients. Thus, we should explore fitting linear mixed effects model with random intercept and slopes.
+
+
+```{r fig.show="hold", cache=TRUE, fig.width=8, fig.height=24}
+#| label: fig-longitudinal_plots
+#| eval: true
+#| echo: FALSE
+#| warning: false
+#| fig-cap: Association between baseline body composition and time.
+
+
+
+#read in data
+composite<-readRDS("composite_impute_dat.rds")
+original<-readRDS("original_impute_dat.rds")
+
+#Save column names of body compositions of interest
+dat_dict<-readRDS("dat_dict.rds")
+dat_dict<-na.locf(dat_dict)
+body_cols<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
+body_cols<-c(body_cols,stringr::str_subset(colnames(composite_baseline),"whole"))
+
+
+#generate pretty names 
+body_cols_pretty<-
+  sapply(body_cols,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+
+longitudinal_plots<-
+  lapply(1:length(body_cols),function(i){
+    
+    name_x<-body_cols[i]
+    pretty_x<-body_cols_pretty[i]
+    
+    if(stringr::str_detect(name_x,"whole")){
+      plot_dat<-composite
+    }else{
+      plot_dat<-original
+    }
+
+
+    ggplot(data=plot_dat)+
+      geom_point(aes(x=times_yr, y=.data[[name_x]],group = mrn)) +
+      geom_line(aes(x=times_yr, y=.data[[name_x]],group = mrn), alpha=0.2)+
+      stat_smooth(
+        data=plot_dat,
+        mapping=aes(x=times_yr, y=.data[[name_x]]),
+        geom="smooth",
+        method="lm",
+        formula=y~ splines::ns(x,df=3),
+        col="red")+
+      ylab(pretty_x)+
+      xlab("Time (year)")
+  
+    
+  })
+
+
+
+
+longitudinal_plots_list<- ggpubr::ggarrange(
+  longitudinal_plots[[1]], longitudinal_plots[[2]],
+  longitudinal_plots[[3]], longitudinal_plots[[4]],
+  longitudinal_plots[[5]], longitudinal_plots[[6]],
+  longitudinal_plots[[7]], longitudinal_plots[[8]],
+  longitudinal_plots[[9]], longitudinal_plots[[10]],
+  longitudinal_plots[[11]], longitudinal_plots[[12]],
+  longitudinal_plots[[13]], longitudinal_plots[[14]],
+  longitudinal_plots[[15]], longitudinal_plots[[16]],
+  ncol = 2, nrow = 8)
+
+print(longitudinal_plots_list)
+
+```
+
+\
+
+### Change from 1st to last scan
+
+We now investigate change in body composition by looking at just the first and the last scan only. @fig-first_last shows histogram of changes in body composition from their 1st to last scan. For example, the left top corner panel shows histogram for IMAT (cm2). The value -10 of this histogram shows that that are some patients whose IMAT value decreased by 10 cm2 from their first to last scan. Similar interpretation can be made for all other facets.
+
+
+```{r fig.show="hold", cache=TRUE, fig.width=15, fig.height=8}
+#| label: fig-first_last
+#| code-fold: true
+#| echo: false
+#| warning: false
+#| fig-cap: "Histogram of change in body composition from first to last scan per person."
+
+
+
+#data
+composite<-readRDS("composite_impute_dat.rds")
+original<-readRDS("original_impute_dat.rds")
+#rank the scans
+original[,index:=rank(times),by=mrn]
+composite[,index:=rank(times),by=mrn]
+
+#Locate the last index
+original[,max_index:=max(index),by=mrn]
+original[,last_scan_lgc:=FALSE]
+original[index==max_index,last_scan_lgc:=TRUE]
+
+composite[,max_index:=max(index),by=mrn]
+composite[,last_scan_lgc:=FALSE]
+composite[index==max_index,last_scan_lgc:=TRUE]
+
+
+#Get baseline index
+original[,is_baseline:=FALSE]
+original[times==0,is_baseline:=TRUE]
+
+composite[,is_baseline:=FALSE]
+composite[times==0,is_baseline:=TRUE]
+
+#Histogram of change in body composition between first and last scan point.
+first_to_last<-
+  lapply(body_cols,function(this_body){
+    if(stringr::str_detect(this_body,"whole")){
+      #Grab the last ever observed
+      last<-composite[last_scan_lgc==TRUE,.SD,.SDcols = c("mrn", this_body)]
+      
+      #Grab the first observed
+      first<-composite[is_baseline==TRUE,.SD,.SDcols = c("mrn", this_body)]
+    
+      }else{ 
+        
+        #Grab the last ever observed
+        last<-original[last_scan_lgc==TRUE,.SD,.SDcols = c("mrn", this_body)]
+    
+    
+        #Grab the first observed
+        first<-original[is_baseline==TRUE,.SD,.SDcols = c("mrn", this_body)]
+    
+      }
+
+    
+    
+    #Subtract the baseline value from last scan value
+    last[[this_body]]-first[[this_body]]
+    
+
+  })
+
+group_names<-
+lapply(1:length(first_to_last),function(i){
+  rep(body_cols_pretty[i],length(first_to_last[[i]]))
+})
+
+
+first_To_last_dat<-data.table(
+  group=do.call(c,group_names),
+  val=do.call(c,first_to_last)
+)
+
+
+#Plot histogram
+ggplot(first_To_last_dat,aes(x=val))+
+  geom_histogram()+
+  facet_wrap(~group, scale="free")+
+  xlab(NULL)
+
+
+```
+
+
+
+Looking at @fig-first_last, most body compositions have fair number of observations both increasing and decreasing from first to last scan. This is against our hypothesis that the body compositions would decrease over time. To make more definitive conclusion on whether the body composition values changed from the first to last scan, Wilcoxon paired rank test (1945) was performed. This test is used to check hypothesis that the median of the differences is zero, assuming symmetry. If symmetry is true, then testing for a zero median is equivalent to testing for no location shift.
+
+
+We performed both one and two-sided tests to identify:
+
+- if there are any changes (either increasing or decreasing) using two-sided test, and
+- if the body compositions decreased over time using one sided test. 
+
+We also controlled false discovery rate at 0.1 to account for multiple testing.
+
+
+
+```{r}
+#| warning: false
+#| echo: false
+#| eval: true 
+
+
+#Wilcoxon rank test from 1st to last point
+first_to_last_wilcoxon<-
+  lapply(body_cols,function(this_body){
+    if(stringr::str_detect(this_body,"whole")){
+      #Grab the last ever observed
+      last<-composite[last_scan_lgc==TRUE,.SD,.SDcols = c("mrn", this_body)]
+      
+      #Grab the first observed
+      first<-composite[is_baseline==TRUE,.SD,.SDcols = c("mrn", this_body)]
+    
+      }else{ 
+        
+        #Grab the last ever observed
+        last<-original[last_scan_lgc==TRUE,.SD,.SDcols = c("mrn", this_body)]
+    
+    
+        #Grab the first observed
+        first<-original[is_baseline==TRUE,.SD,.SDcols = c("mrn", this_body)]
+    
+      }
+
+    
+    
+
+  #two sided test. Use exact p-value due to sample size <50. Normal approximation may be inappropriate.
+  #The quantiles used for confidence intervals are from distribution of wilcoxon signed rank statistics
+
+  two_sided_test<-
+    wilcox.test(
+      last[[this_body]],
+      first[[this_body]], 
+      alternative = c("two.sided"),
+      paired=TRUE,
+      conf.int=TRUE,
+      exact=TRUE)
+
+  #one sided- less (going from x to y decrease value)
+  less_test<-
+    wilcox.test(
+      x=first[[this_body]], #First scan
+      y=last[[this_body]], #last scan
+      alternative = c("greater"), #This assumes that x is greater than y.
+      paired=TRUE, 
+      conf.int=TRUE, 
+      exact=TRUE)
+  
+  return(
+    list(
+  "two_sided_test"=two_sided_test,
+  "less_test"=less_test)
+  )
+
+  })
+
+
+names(first_to_last_wilcoxon)<-body_cols
+
+#Extract p-values
+wilcoxon_test_out_p<-lapply(first_to_last_wilcoxon,function(tests){
+  return(c(
+  "two_sided_test"=tests$two_sided_test$p.value,
+  "less_test"=tests$less_test$p.value
+))
+  
+})
+
+#Perform FDR on two sided tests
+two_sided_test_wilcoxon<-sapply(wilcoxon_test_out_p,"[[","two_sided_test")
+qval_wilcox<-
+qvalue::qvalue(p=two_sided_test_wilcoxon,
+               lambda=seq(min(two_sided_test_wilcoxon), max(two_sided_test_wilcoxon), 0.01))
+summary(qval_wilcox)
+#all test are significant. The scan values from first to last is changing over time with both qvalue at 0.05 and 0.1.
+
+#which ones are decreasing?
+less_test_wilcoxon<-sapply(wilcoxon_test_out_p,"[[","less_test")
+qval_wilcox_less<-
+qvalue::qvalue(p=less_test_wilcoxon,
+               lambda=seq(min(less_test_wilcoxon), max(less_test_wilcoxon), 0.01))
+summary(qval_wilcox_less)
+#When q-value is set at 0.05, none of the body compositions are decreasing 
+#But when q-value is set at 0.1, two body compositions are decreasing over time. 
+# cat("Belwo are the body composition and their Wilcoxon one sided test that are significantly decreaseing over time.")
+qval_wilcox_less$qvalues[qval_wilcox_less$qvalues<=0.1]
+#L3mid;IMAT;cross_sectional_area_cm2  L3mid;SAT;cross_sectional_area_cm2 
+#                         0.09032282                          0.09032282
+
+```
+
+Based on the Wilcoxon paired rank test, all 16 body compositions have median changes to decreasing over time from their first to last scan. However, only IMAT (cm2) and SAT (cm2) has decreasing pattern between the first and last scan.
+
+
+
+
+
+\
+
+
+
+### Change from 1st to 2nd scan
+
+
+Similarly, we investigated changes from the first to second scan. @fig-first_second shows histogram of changes in body composition from their 1st to 2nd scan. For example, the left top corner panel shows histogram for IMAT (cm2). The value -5 of this histogram shows that that are some patients whose IMAT value decreased by 5 cm2 from their first to second scan. Similar interpretation can be made for all other facets.
+
+```{r fig.show="hold", cache=TRUE, fig.width=15, fig.height=8}
+#| label: fig-first_second
+#| code-fold: true
+#| echo: false
+#| warning: false
+#| fig-cap: Histogram of change in body composition from first to second scan per person.
+
+
+#Histogram of change in body composition between first and second point.
+first_to_second<-
+  lapply(body_cols,function(this_body){
+    
+    if(stringr::str_detect(this_body,"whole")){
+      
+      #Select columnes of interets
+      tmp<-composite[,.SD,.SDcols = c("mrn",this_body,"index")]
+
+      }else{ 
+        
+      tmp<-original[,.SD,.SDcols = c("mrn",this_body,"index")]
+
+      }
+
+      #Expand by rank 1 and 2
+      tmp<-dcast(tmp,mrn~index,value.var = this_body)
+      
+      #Subtract the baseline value from second scan value
+      tmp[,`2`-`1`]
+
+  })
+
+
+group_names<-
+lapply(1:length(first_to_second),function(i){
+  rep(body_cols_pretty[i],length(first_to_second[[i]]))
+})
+
+
+first_To_second_dat<-data.table(
+  group=do.call(c,group_names),
+  val=do.call(c,first_to_second)
+)
+
+
+#Plot histogram
+ggplot(first_To_second_dat,aes(x=val))+
+  geom_histogram()+
+  facet_wrap(~group, scale="free")+
+  xlab(NULL)
+
+
+```
+
+
+Based on @fig-first_second, majority of patients experienced increase in body compositions.  
+
+
+```{r}
+#| eval: true
+#| echo: false
+#| warning: false
+
+
+
+#Wilcoxon test from 1st to 2nd point
+
+wilcoxon_test_out2<-
+lapply(body_cols,function(this_body){
+  
+    if(stringr::str_detect(this_body,"whole")){
+      
+      #Select columnes of interets
+      tmp<-composite[,.SD,.SDcols = c("mrn",this_body,"index")]
+
+      }else{ 
+        
+      tmp<-original[,.SD,.SDcols = c("mrn",this_body,"index")]
+
+      }
+
+      #Expand by rank 1 and 2
+      tmp<-dcast(tmp,mrn~index,value.var = this_body)
+      
+#two sided test. Use exact p-value due to sample size <50. Normal approximation may be inappropriate.
+#The quantiles used for confidence intervals are from distribution of wilcoxon signed rank statistics
+
+two_sided_test<-
+wilcox.test(tmp$`1`,
+            tmp$`2`, alternative = c("two.sided"),
+            paired=TRUE,
+            conf.int=TRUE,
+            exact=TRUE)
+
+#one sided- less (going from x to y decrease value)
+less_test<-
+wilcox.test(tmp$`1`,
+            tmp$`2`,  
+            alternative = c("greater"),
+             paired=TRUE, 
+            conf.int=TRUE, 
+            exact=TRUE)
+
+return(list(
+  "two_sided_test"=two_sided_test,
+  "less_test"=less_test
+))
+})
+names(wilcoxon_test_out2)<-body_cols
+
+#Extract p-values
+wilcoxon_test_out_p2<-lapply(wilcoxon_test_out2,function(tests){
+  return(c(
+  "two_sided_test"=tests$two_sided_test$p.value,
+  "less_test"=tests$less_test$p.value
+))
+  
+})
+
+#Perform FDR on two sided tests
+two_sided_test_wilcoxon2<-sapply(wilcoxon_test_out_p2,"[[","two_sided_test")
+qval_wilcox2<-
+qvalue::qvalue(p=two_sided_test_wilcoxon2,
+               lambda=seq(min(two_sided_test_wilcoxon2), max(two_sided_test_wilcoxon2), 0.01))
+summary(qval_wilcox2)
+#all change at q-value<0.05.
+
+
+
+
+
+#which ones are decreasing?
+less_test_wilcoxon2<-sapply(wilcoxon_test_out_p2,"[[","less_test")
+# cat("Belwo are the body composition and their Wilcoxon one sided test that are significantly decreaseing over time.")
+qval_wilcox2_less<-
+qvalue::qvalue(p=less_test_wilcoxon2,
+               lambda=seq(min(less_test_wilcoxon2), max(less_test_wilcoxon2), 0.01))
+summary(qval_wilcox2_less)
+#Only two decreasing at q-value<0.05
+qval_wilcox2_less$qvalues[qval_wilcox2_less$qvalues<0.05]
+#L3mid;IMAT;cross_sectional_area_cm2  L3mid;SAT;cross_sectional_area_cm2 
+#                       0.0004736962                        0.0386882878 
+```
+
+Again, we performed Wilcoxon paired rank tests, with the same aim and FDR controlling as the previous sub-section. From the tests, we were able to conclude that all 12 body compositions significantly changed from first to second scan, but only  `r paste(body_cols_pretty[qval_wilcox2_less$qvalues<0.05],sep=", ")` decreased from the first to second scan when q-value is set to be $<0.05$. This result is same as that of change from 1st to last scan. 
+
+
+
+
+\
+
+### Marginal Survival Probability
+
+```{r}
+#| include: FALSE
+#| eval: true
+#| warning: false
+#| message: false
+
+
+#generate median survival (95% CI) on marginal time to death. No fitting with variables.
+
+
+#read in data
+composite<-readRDS("composite_impute_dat.rds")
+original<-readRDS("original_impute_dat.rds")
+
+
+#Generate combine dataset using baseline only.
+original_baseline<-copy(original)
+original_baseline[,is_baseline:=0]
+original_baseline[times==0,is_baseline:=1]
+original_baseline<-original_baseline[is_baseline==1,]
+
+composite_baseline<-copy(composite)
+composite_baseline[,is_baseline:=0]
+composite_baseline[times==0,is_baseline:=1]
+composite_baseline<-composite_baseline[is_baseline==1,]
+
+
+#Save column names of body compositions of interest
+dat_dict<-readRDS("dat_dict.rds")
+dat_dict<-na.locf(dat_dict)
+body_cols<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
+body_cols<-c(body_cols,stringr::str_subset(colnames(composite_baseline),"whole"))
+
+
+#generate pretty names 
+body_cols_pretty<-
+  sapply(body_cols,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+
+#Two different survival plots based on 48 vs 46 patients.
+fit1_original <- survfit(Surv(new_OS_time_yr, new_OS_ind) ~ 1, data = original_baseline)
+fit1_composite <- survfit(Surv(new_OS_time_yr, new_OS_ind) ~ 1, data = composite_baseline)
+
+
+
+summary_fit1_original<-summary(fit1_original)$table
+summary_fit1_composite<-summary(fit1_composite)$table
+source("survfit_median_CI.R")
+survfit_median_CI(fit1_original)
+survfit_median_CI(fit1_composite)
+#Same median and confidence intervals.
+#check. Who are the ones excluded?
+original_baseline[!(mrn %in% composite_baseline$mrn),.(new_OS_time_yr,new_OS_ind)]
+#One dead, one censored.
+
+```
+
+
+
+```{r fig.show="hold", fig.width=6, fig.height=6}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+#| label: fig-KMplots
+#| fig-cap: Kaplan-Meier curve demonstrating survival probability over time (year). 
+#| fig-subcap: ["48 patients used for original body compositions", "46 patients used for composite body compositions"]
+#| layout-ncol: 2
+
+# #| fig-subcap: 
+# #|     - 48 patients used for original body compositions
+# #|     - 46 patients used for composite body compositions
+
+
+#Kaplan meier curve
+#display that works for HTML.
+
+source("return_km_plot.R")
+
+km_plot_original<-return_km_plot(data = original_baseline, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" ) |> suppressWarnings() #Without suppressWarnings(), I still see warning printed out in html file, even with warning: false.
+km_plot_composite<-return_km_plot(data = composite_baseline, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" ) |> suppressWarnings()
+
+
+#Remove legend
+# Assuming your plot is saved as 'x'
+km_plot_original$plot <- km_plot_original$plot + theme(legend.position = "none")
+km_plot_composite$plot <- km_plot_composite$plot + theme(legend.position = "none")
+
+
+
+#subfigure a
+km_plot_original
+
+#subfigure b
+km_plot_composite
+
+
+
+```
+
+
+@fig-KMplots shows Kaplan Meier plot showing survival probability. @fig-KMplots-1 is for the 48 patients used for analyzing original body compositions and @fig-KMplots-2 is for the 46 patients used for analyzing composite body compositions. For both groups, the median survival of patients was `r sprintf("%.2f",summary_fit1_original["median"])` year (95% confidence interval (CI) : `r sprintf("%.2f",summary_fit1_original["0.95LCL"])` – `r sprintf("%.2f",summary_fit1_original["0.95UCL"])`) since the metastatic diagnosis.
+
+
+
+
+```{r  fig.show="hold", fig.width=15, fig.height=8}
+## #| label: fig-KMplot
+## #| fig-cap: "Kaplan-Meier curve demonstrating survival probability over time (months)."
+#| echo: false
+#| eval: FALSE
+#| warning: false
+
+#Kaplan meier curve
+#That works for non pdf files.
+
+source("return_km_plot.R")
+
+km_plot_original<-return_km_plot(data = original_baseline, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" )
+km_plot_composite<-return_km_plot(data = composite_baseline, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" )
+
+
+#Remove legend
+# Assuming your plot is saved as 'x'
+km_plot_original$plot <- km_plot_original$plot + theme(legend.position = "none")
+km_plot_composite$plot <- km_plot_composite$plot + theme(legend.position = "none")
+
+#generate sub numbering for the plots
+km_plot_original$plot<-km_plot_original$plot + labs(title ="A) 48 patients used for original body compositions")
+km_plot_composite$plot<-km_plot_composite$plot + labs(title="B) 46 patients used for composite body compositions")
+
+km_plots<-list(km_plot_original,km_plot_composite)
+
+arrange_ggsurvplots(km_plots, print = TRUE,
+                    ncol = 2, nrow = 1)
+
+
+```
+
+
+
+\
+
+# Modeling
+
+Now, we use separate modeling to answer the two research questions. For research aim 1 we model body composition over time using linear mixed effect model. For research aim 2, we use time-dependent Cox PH model.
+
+
+
+## Linear mixed effect model
+
+
+Here's the flow. This was not included in SAP so update SAP with how we finalized what model to use.
+
+1. Since we are interested in characterizing the trends in changes of body composition over time, we considered two modeling approaches: (i) fitting body composition as a linear function of time, and (ii) fitting Y using a flexible nonlinear function of time via natural cubic splines. To determine the most suitable functional form to for describing changes in Y, we compared these two models based on the Akaike information criterion (AIC). The model producing the lowest AIC was selected as the optimal representation of the relationship between body composition and time. All body composition had lower AIC (thus better fit) with natural cubic splines transformation on time, except for SAT (mean HU) and VAT (cm2). 
+
+However, the degree of difference in AIC was not too different between the two different models. Thus, we implemented diagnostic plot. We plotted the population residuals versus time and residuals after accounting for individual random derivation versus time. The patterns of residuals over time was not much different between the two models, both the plots generated with the population residual vs. time and  individual random effect residuals vs. time. Thus, we decided to use the linear function of time.
+
+
+2. Next, we evaluated the significance of age at metastatic diagnosis using analysis of variance (ANOVA) for each different BC. Thus evaluation was performed to determine whether inclusion of age was necessary, especially considering our goal of visualizing the relationship between BC and time at would be complicated by need to decide what specific value of age should the plot be provided. After correcting for multiple comparisons using the False Discovery Rate (FDR) procedure with a significance threshold of q < 0.05, we found that 5 out of the 16 BCs showed significantly differences when age was excluded from the models. To maintain consistency and avoid confusion in our visualizations and interpretations across all outcomes, we opted to retain age in the final models for all 16 variables.
+
+3. 25th, median and 75th percentile of age was chosen to provide plot. The plot had hard confidence band and did not show much fluctuation that requires natural splines. Thus, we decided to compare the results with the models that used linear splines with one cutpoint
+
+```{r}
+#| warning: FALSE
+#| include: false 
+#| eval: true
+
+# Read in and prepare data
+
+
+
+#read in data
+composite<-readRDS("composite_impute_dat.rds")
+original<-readRDS("original_impute_dat.rds")
+
+
+#Find number of points per patient
+summary(original[,.N,by=mrn][,N])
+summary(composite[,.N,by=mrn][,N])
+
+#Generate combine dataset using baseline only.
+original_baseline<-copy(original)
+original_baseline[,is_baseline:=0]
+original_baseline[times==0,is_baseline:=1]
+original_baseline<-original_baseline[is_baseline==1,]
+
+composite_baseline<-copy(composite)
+composite_baseline[,is_baseline:=0]
+composite_baseline[times==0,is_baseline:=1]
+composite_baseline<-composite_baseline[is_baseline==1,]
+
+
+#Save column names of body compositions of interest
+dat_dict<-readRDS("dat_dict.rds")
+dat_dict<-na.locf(dat_dict)
+body_cols<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
+body_cols<-c(body_cols,stringr::str_subset(colnames(composite),"whole"))
+body_cols_edit<-stringr::str_replace_all(body_cols,";","__") #needed to fit LME model
+
+
+setnames(original,body_cols,body_cols_edit)
+
+#generate pretty names 
+body_cols_pretty<-
+  sapply(body_cols,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+names(body_cols_pretty)<-body_cols_edit
+
+```
+
+
+
+
+### Check normality assumption
+
+
+
+```{r fig-check-normal-long, fig.show="hold", fig.width=13, fig.height=13}
+#| echo: false
+#| eval: true 
+#| fig-cap: Density plot of all body compositions
+
+
+#check normality assumption 
+par(mfcol=c(4,4))
+for(x in body_cols_edit){
+  if(stringr::str_detect(x,"whole")){
+    plot(density(composite[[x]]), main=body_cols_pretty[x], xlab="")
+  }else{
+    plot(density(original[[x]]), main=body_cols_pretty[x], xlab="")
+  }
+  # readline("[enter]:")
+}
+```
+
+Based on @fig-check-normal-long, we decided to perform natural log transformaion. For all variables, if there were any values $\leq 0$, we add minimum of the value and 1 to allow for log transformation. 
+
+```{r fig-check-normal-long-loge, fig.show="hold", fig.width=5, fig.height=40}
+#| echo: false
+#| eval: true 
+#| fig-cap: Density plot of all body compositions, after applying natural log transformation. 
+
+
+#check normality assumption 
+par(mfrow=c(16,2))
+for(x in body_cols_edit){
+  if(stringr::str_detect(x,"whole")){
+    this_plot<-composite[[x]]
+    if(any(this_plot<=0)){
+      this_plot<-this_plot+abs(min(this_plot)) + 1
+    }
+
+  }else{
+    
+    this_plot<-original[[x]]
+    if(any(this_plot<=0)){
+      this_plot<-this_plot+abs(min(this_plot)) + 1
+    }
+
+  }
+  
+  plot(density(this_plot), main=paste(body_cols_pretty[x],"original"), xlab="")
+  plot(density(log(this_plot)), main=paste(body_cols_pretty[x],"ln"), xlab="")
+  # readline("[enter]:")
+}
+
+```
+
+
+Based on @fig-check-normal-long-loge, it seems reasonable to log-transform akk except for IMAT (mean HU), SKM (cm3), and SKM (mean HU). Let's do that.
+
+
+
+```{r}
+#| warning: FALSE
+#| include: false 
+#| eval: true
+
+#Log transform variables
+
+log_original<-copy(original)
+log_composite<-copy(composite)
+
+#Keep the variable names
+no_log_transform<-c("L3mid__IMAT__HU_mean","L3mid__SKM__volume_cm3","L3mid__SKM__HU_mean")
+yes_log_transform<-NULL
+yes_log_shift_transform<-NULL
+
+for(x in body_cols_edit){
+  if(x %in% c("L3mid__IMAT__HU_mean","L3mid__SKM__volume_cm3","L3mid__SKM__HU_mean")){
+  
+  }else if(stringr::str_detect(x,"whole")){
+    
+    temp<-composite[[x]]
+    if(any(temp<=0)){
+      yes_log_shift_transform<-c(yes_log_shift_transform,x)
+      temp<-temp+abs(min(temp)) + 1
+    }else{
+      yes_log_transform<-c(yes_log_transform,x)
+    }
+    log_composite[[x]]<-log(temp)
+  }else{
+    temp<-original[[x]]
+    if(any(temp<=0)){
+      temp<-temp+abs(min(temp)) + 1
+      yes_log_shift_transform<-c(yes_log_shift_transform,x)
+    }else{
+      yes_log_transform<-c(yes_log_transform,x)
+    }
+    
+    log_original[[x]]<-log(temp)
+
+  }
+}
+
+saveRDS(log_original,"log_original.rds")
+saveRDS(log_composite,"log_composite.rds")
+
+```
+
+
+
+### compare linear vs. natrual splines time 
+
+
+
+
+```{r}
+#| warning: FALSE
+#| include: false 
+#| eval: true
+
+#fit linear and nautral splines function on time 
+
+
+
+source("myCatch.R") #function that supress error for LMER fit 
+
+set.seed(55)
+
+#Fit a model without splines term
+lme0<-
+lapply(body_cols_edit,function(x){
+    my_formula<-formula(paste(x,"~ ageAtMetDiag + gender+times_yr"))
+
+    if(stringr::str_detect(x,"whole")){
+        myCatch(
+      lme(my_formula, 
+      random = ~times_yr|mrn,
+      # random = list(mrn = pdDiag(~ times_yr)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+      method = "ML", 
+      control =list(msMaxIter = 1000, msMaxEval = 1000),
+      data=log_composite)
+  )
+    }else{
+        myCatch(
+      lme(my_formula, 
+      random = ~times_yr|mrn,
+      # random = list(mrn = pdDiag(~ times_yr)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+      method = "ML", 
+      control =list(msMaxIter = 1000, msMaxEval = 1000),
+      data=log_original)
+  )
+    }
+
+
+})
+
+
+#check for error
+sapply(lme0,function(x)x$result |> class()) #no error. All "lme"
+lme0<-lapply(lme0,"[[","result") #extract result
+names(lme0)<-body_cols_edit
+
+
+
+set.seed(55)
+
+
+#Fit natural splines 
+lme1<-
+lapply(body_cols_edit,function(x){
+    my_formula<-formula(paste(x,"~ ageAtMetDiag + gender+splines::ns(times_yr, df=2)"))
+
+    if(stringr::str_detect(x,"whole")){
+        myCatch(
+      lme(my_formula, 
+      random = ~times_yr|mrn,    
+      # random = list(mrn = pdDiag(~ times_yr)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+      method = "ML", 
+      control =list(msMaxIter = 1000, msMaxEval = 1000),
+      data=log_composite) 
+  )
+    }else{
+        myCatch(
+      lme(my_formula, 
+      random = ~times_yr|mrn,    
+      # random = list(mrn = pdDiag(~ times_yr)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+      method = "ML", 
+      control =list(msMaxIter = 1000, msMaxEval = 1000),
+      data=log_original)
+  )
+    }
+})
+#check for error
+sapply(lme1,function(x)x$result |> class()) #no error
+lme1<-lapply(lme1,"[[","result")
+names(lme1)<-body_cols_edit
+
+```
+
+
+
+```{r}
+#| echo: false
+#| eval: true 
+#| include: false
+
+#ANOVA: Compare linear vs. natrual splines fit.
+
+#ANOVA
+compare_anova<-
+lapply(1:length(lme0),function(i){
+  anova(lme0[[i]],lme1[[i]])
+})
+names(compare_anova)<-body_cols_pretty[body_cols_edit]
+anova_p<-sapply(compare_anova,function(x)x$`p-value`[2])
+anova_p_q<-qvalue(p=anova_p,lambda = seq(min(anova_p), max(anova_p), 0.01))
+anova_p_q_vector<-anova_p_q$qvalues
+anova_p_q_vector[anova_p_q_vector<=.05] #all but VAT (cm2) 
+anova_p_q_vector[anova_p_q_vector>.05] #VAT (cm2) 
+
+```
+
+Using ANOVA (and accounting for multiple testing using false positive discovery rate using $q \leq 0.05$), all but  VAT (cm2)  has substantially better fit with natural transformation on time. However, we also checked the residuals vs. time plot from both the linear and natural splines time models to see if there patterns not captured by the fit. @fig-compre-time uses fixed effect residuals (population average) ,and @fig-compre-time-random shows fixed and random effect residuals (accounting for subject specific random deviation).
+
+
+```{r fig-compre-time, fig.show="hold", fig.width=7, fig.height=42}
+#| echo: false
+#| eval: true 
+#| fig-cap: Residuals vs. time plot, where the resdiuals is the total population residual. 
+
+#residual vs. time plot: if there's remaining X not captured then there's supposed to be patterns. 
+
+
+par(mfrow=c(16,2))
+for(i in 1:length(lme0)){
+  plot(x=lme0[[i]]$data$times_yr,
+       y=lme0[[i]]$residuals[,"fixed"],
+       main=paste(body_cols_pretty[i],"linear"), ylab="residuals", xlab="time (year)")
+  abline(h=0, col="red")
+  
+  plot(x=lme1[[i]]$data$times_yr,
+       y=lme1[[i]]$residuals[,"fixed"],
+       main=paste(body_cols_pretty[i],"ns"), ylab="residuals", xlab="time (year)")
+  abline(h=0, col="red")
+}
+```
+
+
+
+
+
+```{r fig-compre-time-random, fig.show="hold", fig.width=7, fig.height=42}
+#| echo: false
+#| eval: true 
+#| fig-cap: Residuals vs. time plot, where the resdiuals account for per patient random variation.
+
+#residual vs. time plot: if there's remaining X not captured then there's supposed to be patterns. 
+
+
+par(mfrow=c(16,2))
+for(i in 1:length(lme0)){
+  plot(x=lme0[[i]]$data$times_yr,
+       y=lme0[[i]]$residuals[,"mrn"],
+       main=paste(body_cols_pretty[i],"linear"), ylab="residuals", xlab="time (year)")
+  abline(h=0, col="red")
+  
+  plot(x=lme1[[i]]$data$times_yr,,
+       y=lme1[[i]]$residuals[,"mrn"],
+       main=paste(body_cols_pretty[i],"ns"), ylab="residuals", xlab="time (year)")
+  abline(h=0, col="red")
+}
+```
+
+
+Comparing the linear and natural splines transformation using @fig-compre-time and @fig-compre-time-random, we can conclude that there isn't visually noticeable difference between the linear and natural splines. Therefore, although formal statistical tests indicated that the natural cubic spline model significantly improved the fit compared to a simpler linear model (ANOVA q-value $\leq$ 0.05), visual inspection of residual plots against the time revealed no pronounced differences. This suggests that while the spline model statistically captures subtle but significant nonlinear trends in the data, these nonlinear effects are sufficiently mild or localized such that they do not substantially alter the overall visual pattern in residual plots. 
+
+Therefore, we choose to use linear time because inference using linear time is understandable, while on natural cubic splines is not. 
+
+
+### Check significance of age
+
+
+
+
+```{r}
+#| echo: false
+#| eval: true 
+#| include: false
+
+#ANOVA: include exclude age
+
+
+set.seed(55)
+lme0_noAge<-
+lapply(body_cols_edit,function(x){
+    my_formula<-formula(paste(x,"~ gender+times_yr"))
+
+    if(stringr::str_detect(x,"whole")){
+        myCatch(
+      lme(my_formula, 
+      random = ~times_yr|mrn,
+      # random = list(mrn = pdDiag(~ times_yr)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+      method = "ML", 
+      control =list(msMaxIter = 1000, msMaxEval = 1000),
+      data=log_composite)
+  )
+    }else{
+        myCatch(
+      lme(my_formula, 
+      random = ~times_yr|mrn,
+      # random = list(mrn = pdDiag(~ times_yr)), #this is a diagonal correlation structure, removing relationship between random intercept and slope.
+      method = "ML", 
+      control =list(msMaxIter = 1000, msMaxEval = 1000),
+      data=log_original)
+  )
+    }
+
+
+})
+
+
+#check for error
+sapply(lme0_noAge,function(x)x$result |> class()) #no error. All "lme"
+lme0_noAge<-lapply(lme0_noAge,"[[","result") #extract result
+names(lme0_noAge)<-body_cols_edit
+
+
+
+#ANOVA
+compare_anova2<-
+lapply(1:length(lme0),function(i){
+  anova(lme0_noAge[[i]],lme0[[i]])
+})
+names(compare_anova2)<-body_cols_edit
+anova_p2<-sapply(compare_anova2,function(x)x$`p-value`[2])
+anova_p_q2<-qvalue(p=anova_p2,lambda = seq(min(anova_p2), max(anova_p2), 0.01))
+anova_p_q_vector2<-anova_p_q2$qvalues
+anova_p_q_vector2[anova_p_q_vector2<=.05] #SKM (cm2), SKM (cm3), SKM (whole body cm3) 
+anova_p_q_vector2[anova_p_q_vector2>.05] #all else
+#Maybe when we are providing plot, just fix one age for the all else group?
+names_keep_one_age<-names(anova_p_q_vector2)[anova_p_q_vector2>.05]
+```
+
+Using ANOVA, we found few models having significant effect by age. Thus, we decided to keep age in our model.
+
+
+### result presentation
+
+```{r}
+#| echo: true
+#| eval: true
+#| warning: false
+
+
+#get predicted values for plotting
+
+#How I chose to calculate the variance
+#https://stats.stackexchange.com/questions/16493/difference-between-confidence-intervals-and-prediction-intervals
+
+
+#Return point estimate and their point prediction interval for population. 
+return_dat<-
+  function(model,dat){
+    
+    #Extract design matrix
+    Z<-model.matrix(formula(model$modelStruct$reStr)[[1]],data=dat)
+    X <- model.matrix(formula(model)[-2], data = dat)
+    
+    #Extract variance 
+    var_cov_matrix_random <- getVarCov(model, type = "random.effects")
+    var_cov_matrix_fixed <- vcov(model)
+    
+    # Prediction variance of mean response
+    var_fixed <- diag(X %*% var_cov_matrix_fixed %*% t(X))
+    var_random <- diag(Z %*% var_cov_matrix_random %*% t(Z))
+    var_total <- var_fixed + var_random 
+
+
+    # Predicted values
+    # predicted <- predict(final_lme[[1]], newdata = tmp_dat, level = 0)
+    predicted <-  X %*% t(t(fixef(model)))
+
+    # Compute intervals
+    alpha <- 0.05
+    z_value <- qnorm(1 - alpha / 2)
+    lower <- predicted - z_value * sqrt(var_total)
+    upper <- predicted + z_value * sqrt(var_total)
+
+
+    #bind to dataset
+    dat$predicted<-predicted
+    dat$lower<-lower
+    dat$upper<-upper
+    dat$var_total<-var_total
+    dat
+  }
+
+
+
+#generate dataset to predict on. at 3 age 
+#25% median and 75% quantiles.
+
+#for original data
+these_gender<-c("M","F")
+these_age<-quantile(original_baseline$ageAtMetDiag,c(0.25,0.5,0.75))
+# original$times_yr |> range() #go from 0 to 0.99
+these_times_yr<-seq(0,0.99,length=100)
+newdat_original<-expand.grid(these_gender,these_age,these_times_yr)
+newdat_original<-data.frame(newdat_original)
+colnames(newdat_original)<-c("gender","ageAtMetDiag","times_yr")
+newdat_original$gender<-as.character(newdat_original$gender)
+
+
+
+#for composite data 
+these_gender<-c("M","F")
+these_age<-quantile(composite_baseline$ageAtMetDiag,c(0.25,0.5,0.75))
+# composite$times_yr |> range() #go from 0 to 0.99
+these_times_yr<-seq(0,0.99,length=100)
+newdat_composite<-expand.grid(these_gender,these_age,these_times_yr)
+newdat_composite<-data.frame(newdat_composite)
+colnames(newdat_composite)<-c("gender","ageAtMetDiag","times_yr")
+newdat_composite$gender<-as.character(newdat_composite$gender)
+
+
+
+#generate prediction data
+predict_all_out<-
+lapply(body_cols_edit,function(x){
+  
+
+  if(x %in% no_log_transform){
+    # predict(lme0[[x]], newdata = newdat_original,level=0)
+    out<-return_dat(lme0[[x]], newdat_original) 
+  }else{
+    
+    # Back-transform predictions to original scale
+
+    #Use delta method for the ones where we transformed y.trans = log(y + abs(min(y)) + 1)
+    #Delta method says y is AN with mean exp(y.trans) -abs(min(y)) - 1
+    #and variance exp(y.trans)*var(y.trans)
+    
+    
+    if(stringr::str_detect(x,"whole")){
+      temp.var<-log_composite[[x]]
+      this.newdata<-newdat_composite
+    }else{
+      temp.var<-log_original[[x]]
+      this.newdata<-newdat_original
+    }
+    
+    #Predict first
+    pred_log_df<-return_dat(lme0[[x]], this.newdata)
+    
+    if(x %in% yes_log_shift_transform){
+    #get point estimate exp(y.trans) -abs(min(y)) - 1
+    minY <- min(temp.var)
+    tmp_est<-exp(pred_log_df$predicted ) - abs(minY) - 1
+    }else{
+     tmp_est<- exp(pred_log_df$predicted )
+    }
+
+
+    #Get variabnce
+    tmp_var<-pred_log_df$var_total * exp(pred_log_df$predicted )^2
+    
+    #Now replace the original estimate with newly predicted values
+    pred_log_df$predicted<-tmp_est
+    
+    alpha <- 0.05
+    z_value <- qnorm(1 - alpha / 2)
+    pred_log_df$lower <- tmp_est - z_value * sqrt(tmp_var)
+    pred_log_df$upper <- tmp_est + z_value * sqrt(tmp_var)
+
+    #return the dataset
+    out<-pred_log_df
+  }
+  
+  
+  
+  #IF we have model where there was no significant age effect, just keep median age
+  if(x %in% names_keep_one_age){
+    median_age<-sort(unique(out$ageAtMetDiag))[2]
+    out[out$ageAtMetDiag==median_age,]
+  }else{
+   out
+  }
+  
+  
+})
+
+    
+
+pred_out_plot<-
+lapply(1:length(predict_all_out),function(i){
+  
+  #for each body composition, plot separate by gender and panel by age. 
+  tmp<-data.table(predict_all_out[[i]])
+  
+  pretty_name<-body_cols_pretty[names(predict_all_out)[i]]
+  #change name of age 
+  tmp[,`Age at baseline`:=sprintf("%.2f",ageAtMetDiag)]
+  ggplot(tmp, aes(x = times_yr, y = predicted, col=gender, fill=gender)) +
+      geom_line()+
+      geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2)+
+      labs(
+        title = paste("Changes in",pretty_name, "of patients who were 64 years old at diagnosis"),
+        x = "Time (year)",
+        y = paste("Predicted value of mean", pretty_name)
+      ) +
+    facet_grid(`Age at baseline`~., scale="free")+
+    theme_minimal()
+  
+  # #Multiple plots each by age 
+  # tmp_list<-pred_out[[i]]
+  # lapply(1:length(tmp_list),function(j){
+  #   
+  # #Sort by predicted value
+  # tmp<-data.table(tmp_list[[j]])
+  # setkeyv(tmp,c("gender","predicted"))
+  #   
+  # ggplot(tmp, aes(x = times_yr, y = predicted, col=gender, fill=gender)) +
+  #     geom_line()+
+  #     geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2)+
+  #     labs(
+  #       title = paste("Changes in",body_cols_edit[i], "of patients who were 64 years old at diagnosis"),
+  #       x = "Time (year)",
+  #       y = paste("Predicted value of mean", body_cols_edit[i])
+  #     ) +
+  #     theme_minimal()+
+  #   ggtitle(paste("baseline age at ",round(unique(tmp$ageAtMetDiag),2),sep = ""))
+  # })
+
+})
+# pred_out_plot #this plots separate for each body composition
+
+
+pred_out_merge<-
+lapply(1:length(predict_all_out),function(i){
+  tmp<-copy(predict_all_out[[i]])
+  tmp<-data.table(tmp)
+  tmp[,`Body composition`:=body_cols_pretty[i]]
+  tmp
+})
+
+pred_out_merge<-rbindlist(pred_out_merge)
+pred_out_merge[,`Age at baseline`:=sprintf("Baseline age: %.2f",ageAtMetDiag)]
+pred_out_merge[gender=="M",gender:="Male"]
+pred_out_merge[gender=="F",gender:="Female"]
+setnames(pred_out_merge,"gender","Gender")
+
+
+
+
+
+```
+
+
+
+
+
+```{r fig.show="hold", cache=TRUE, fig.width=20, fig.height=20}
+#| label: fig-SKM-whole-body-cm3
+#| echo: false
+#| eval: true
+#| warning: false
+#| fig-cap: Longitudinal plot of composite body compositions over time (year).
+
+
+#SKM (whole body cm3) has significant age effect so use the age
+#Plot the originals together
+# ggplot(pred_out_merge[`Body composition`=="SKM (whole body cm3)"], aes(x = times_yr, y = predicted, col=Gender, fill=Gender)) +
+#   geom_line()+
+#   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, linetype=2)+
+#   facet_wrap( ~`Age at baseline`, scales="fixed", dir="v", strip.position = "top", ncol=3)+
+#   theme(#strip.background = element_blank(),
+#     strip.placement = "outside")+
+#   ylab("Predicted value")+
+#   xlab("Time (year)")
+
+
+
+ggplot(pred_out_merge[!(`Body composition` %in% body_cols_pretty[names_keep_one_age])], aes(x = times_yr, y = predicted, col=Gender, fill=Gender)) +
+  geom_line()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, linetype=2)+
+  facet_wrap( `Age at baseline`~`Body composition`, scales="free", dir="v", strip.position = "top", ncol=3)+
+  theme(#strip.background = element_blank(),
+    strip.placement = "outside")+
+  ylab("Predicted value")+
+  xlab("Time (year)")
+
+
+# #Plot the originals together
+# test<-copy(pred_out_merge[stringr::str_detect(`Body composition`,"whole")])
+# test[,`Age at baseline`:=factor(`Age at baseline`, levels=c("Baseline age: 57.46", "Baseline age: 64.30", "Baseline age: 69.20"), labels = c("Baseline age: 57.46", "Baseline age: 64.30", "Baseline age: 69.20"))]
+# ggplot(test, aes(x = times_yr, y = predicted, col=Gender, fill=Gender)) +
+#   geom_line()+
+#   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, linetype=2)+
+#   facet_wrap( `Age at baseline`~`Body composition`, scales="free", dir="v", strip.position = "top", ncol=3)+
+#   theme(#strip.background = element_blank(), 
+#     strip.placement = "outside")+
+#   ylab("Predicted value")+
+#   xlab("Time (year)")
+
+```
+
+
+Plot them separaetly 
+
+
+```{r, fig.width=15, fig.height=5}
+#| label: fig-significiant_age
+#| message: false
+#| echo: false
+#| fig-cap: Body composition plots where the age at diagnosis was significant
+#| fig-subcap:
+#|   - SKM (cm2)
+#|   - SKM (cm3)
+#|   - SKM (whole body cm3)
+#| layout-nrow: 3
+
+
+
+keep_morethan_1<-body_cols_pretty[!body_cols_edit %in%names_keep_one_age]
+plt<-lapply(keep_morethan_1,function(x){
+    ggplot(pred_out_merge[`Body composition`==x,], aes(x = times_yr, y = predicted, col=Gender, fill=Gender)) +
+  geom_line()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, linetype=2)+
+  facet_wrap( ~`Age at baseline`, scales="fixed", dir="v", strip.position = "top", ncol=3)+
+  theme(#strip.background = element_blank(),
+    strip.placement = "outside")+
+  ylab("Predicted value")+
+  xlab("Time (year)")
+})
+purrr::walk(plt, print)
+# for( x in keep_morethan_1){
+#   ggplot(pred_out_merge[`Body composition`==x,], aes(x = times_yr, y = predicted, col=Gender, fill=Gender)) +
+#   geom_line()+
+#   geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, linetype=2)+
+#   facet_wrap( ~`Age at baseline`, scales="fixed", dir="v", strip.position = "top", ncol=3)+
+#   theme(#strip.background = element_blank(),
+#     strip.placement = "outside")+
+#   ylab("Predicted value")+
+#   xlab("Time (year)")
+# }
+
+
+```
+
+
+
+
+
+
+```{r fig.show="hold", cache=TRUE, fig.width=15, fig.height=16}
+#| label: fig-no-significiant_age
+#| echo: false
+#| eval: true
+#| warning: false
+#| fig-cap: Longitudinal plot of composite body compositions over time (year).
+
+
+keep_1<-body_cols_pretty[body_cols_edit %in%names_keep_one_age]
+ggplot(pred_out_merge[`Body composition` %in% keep_1,], aes(x = times_yr, y = predicted, col=Gender, fill=Gender)) +
+  geom_line()+
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2, linetype=2)+
+  facet_wrap( ~ `Body composition`, scales="free", dir="v", strip.position = "top", ncol=3)+
+  theme(#strip.background = element_blank(),
+    strip.placement = "outside")+
+  ylab("Predicted value")+
+  xlab("Time (year)")
+
+```
+
+
+Provide estimate (95% confidence interval) in a table
+
+
+```{r}
+#| eval: true
+#| echo: false
+#| warning: false
+#| label: tbl-separate_longitudinal_out
+#| tbl-cap: Estimate (95% confidence interval). When transformation is log(Y), the estimate and 95% CI is given as percent change in body composition. For example, for every 1 year, IMAT cm2 decreased by 5% and IMAT cm3 increased by 60%.
+
+
+ci_out<-lapply(body_cols_edit,function(x){
+  tmp<-data.table(t(intervals(lme0[[x]])$fixed["times_yr",]))
+  cbind(body_cols_pretty[x],tmp)
+})
+ci_out<-rbindlist(ci_out)
+ci_out[,modeling_scheme:=as.character(NA)]
+setnames(ci_out, "V1","bc")
+ci_out[bc %in% body_cols_pretty[no_log_transform],modeling_scheme:="Y"]
+ci_out[bc %in% body_cols_pretty[yes_log_transform],modeling_scheme:="log(Y)"]
+ci_out[bc %in% body_cols_pretty[yes_log_shift_transform],modeling_scheme:="log(Y + abs(min(Y))+1)"]
+
+#Add variance of times_yr
+ci_out[,var_times_yr:=sapply(lme0,function(x)vcov(x)["times_yr","times_yr"])]
+
+#For log(Y) we can still do percent increase. Use delta method.
+ci_out[,exp_est:=exp(est.)]
+ci_out[,var_exp_est:=exp_est^2*var_times_yr]
+ci_out[,exp_upper:=exp_est + qnorm(0.975)*sqrt(var_exp_est)]
+ci_out[,exp_lower:=exp_est - qnorm(0.975)*sqrt(var_exp_est)]
+
+ci_out[,est_ci:=sprintf("%.2f (%.2f, %.2f)",est.,lower,upper)]
+ci_out[,exp_est_ci:=sprintf("%.2f (%.2f, %.2f)",exp_est,exp_lower,exp_upper)]
+
+
+#For the ones where we didn't transform the variable and have log(Y + abs(min(Y))+1), just use est_ci.
+#For the ones where we transformed log(Y), use exp_est_ci.
+ci_out[,final_ci:=as.character(NA)]
+ci_out[modeling_scheme %in% c("Y","log(Y + abs(min(Y))+1)"),final_ci:=est_ci]
+ci_out[modeling_scheme=="log(Y)",final_ci:=exp_est_ci]
+
+setnames(ci_out,"bc","Body Composition")
+setnames(ci_out,"modeling_scheme","Transformation")
+
+
+ci_out[Transformation %in% c("Y","log(Y + abs(min(Y))+1)"),final_ci:=ifelse(lower*upper>0,paste(final_ci,"*", sep=""), final_ci)]
+ci_out[Transformation=="log(Y)",final_ci:=ifelse((exp_lower>1 & exp_upper>1) | (exp_lower<1 & exp_upper<1),paste(final_ci,"*", sep=""), final_ci)]
+
+
+kable(ci_out[,.(`Body Composition`,Transformation,final_ci)])
+
+```
+
+
+
+
+
+
+
+```{r}
+#| eval: true
+#| echo: false
+#| warning: false
+#| label: tbl-separate_longitudinal_out_monthly
+#| tbl-cap: Estimate (95% confidence interval). When transformation is log(Y), the estimate and 95% CI is given as percent change in body composition. For example, for every 1 month, there is 2% increase in IMAT (whole body cm3)
+
+
+tmp_func<-function(x,unit_difference){
+  
+  #Extract estimate
+  est<-summary(x)$coefficient$fixed["times_yr"]
+  names(est)<-"est"
+  var<-vcov(x)["times_yr","times_yr"]
+  
+  new_est<-unit_difference*est
+  new_var<-unit_difference^2*var
+  
+  #get 95% CI 
+  tmp<-new_est + c(-1,1)*qnorm(0.975)*sqrt(new_var)
+  out<-c(new_est,
+         "lower"=tmp[1],
+         "upper"=tmp[2])
+  
+  #Get exponentiated version
+  exp_new_est<-exp(new_est)
+  names(exp_new_est)<-"exp_est"
+  exp_new_var<-exp_new_est^2*new_var
+  
+  tmp<-exp_new_est + c(-1,1)*qnorm(0.975)*sqrt(exp_new_var)
+  
+  out<-c(out,
+         exp_new_est,
+         "exp_lower"=tmp[1],
+         "exp_upper"=tmp[2])
+  out
+}
+
+monthly_out<-lapply(lme0,tmp_func,unit_difference=1/12)
+monthly_out<-do.call(rbind,monthly_out)
+monthly_out<-data.table("bc"=body_cols_pretty[rownames(monthly_out)],
+                        monthly_out)
+monthly_out<-merge(
+  monthly_out,
+  ci_out[,.(`Body Composition`,Transformation)], 
+  by.x="bc",by.y="Body Composition")
+
+monthly_out[,est_ci:=sprintf("%.2f (%.2f, %.2f)",est,lower,upper)]
+monthly_out[,exp_est_ci:=sprintf("%.2f (%.2f, %.2f)",exp_est,exp_lower,exp_upper)]
+
+monthly_out[,final_ci:=as.character(NA)]
+monthly_out[Transformation %in% c("Y","log(Y + abs(min(Y))+1)"),final_ci:=est_ci]
+monthly_out[Transformation=="log(Y)",final_ci:=exp_est_ci]
+
+monthly_out[Transformation %in% c("Y","log(Y + abs(min(Y))+1)"),final_ci:=ifelse(lower*upper>0,paste(final_ci,"*", sep=""), final_ci)]
+monthly_out[Transformation=="log(Y)",final_ci:=ifelse((exp_lower>1 & exp_upper>1) | (exp_lower<1 & exp_upper<1),paste(final_ci,"*", sep=""), final_ci)]
+
+setnames(monthly_out,"bc","Body Composition")
+
+kable(monthly_out[,.(`Body Composition`,Transformation,final_ci)])
+
+```
+
+
+
+
+\
+
+## Time-dependent Cox PH model
+
+We don't need to transform the body composition variable because there's not normality assumption. 
+
+
+```{r}
+#| echo: false
+#| eval: true
+#| label: tbl-cox_time_dep
+#| tbl-cap: Hazard ratio (95% confidence interval) of body compositions. The time-dependent Cox model is fit.
+
+#time dependent cox model
+
+library(survival)
+time_dep_func<-function(dat, time_dep_covars){
+  dat[,is_baseline:=0]
+  dat[StudyDate==earliest_studydate,is_baseline:=1]
+  baseline_dat<-dat[is_baseline==1,]
+  
+  
+  baseline_dat2<-copy(baseline_dat)
+  # grab_thes<-colnames(baseline_dat2)[!colnames(baseline_dat2) %in% body_cols_names]
+  grab_thes<-c('mrn','PatientID','StudyDate','StudyID','ageAtMetDiag','gender',
+               'raceEthnicity','earliest_studydate','times','times_mth','times_yr',
+               'deathDate','metastaticDate','new_OS_ind','new_OS_time','new_OS_time_mth',
+               'new_OS_time_yr')
+  baseline_dat2<-baseline_dat2[,.SD,.SDcols = grab_thes]
+  tmp2<-tmerge(baseline_dat2,
+               baseline_dat2,
+               id=PatientID,
+               # endpt = event(new_OS_time_yr, new_OS_ind)
+               endpt = event(new_OS_time_mth, new_OS_ind)
+               )
+  
+  tmp3<-copy(tmp2)
+
+  for (covariate in time_dep_covars) {
+    tmp3 <- tmerge(
+      data1 = tmp3,
+      data2 = dat,
+      id = PatientID,
+      # Dynamically create the column name for the covariate
+      
+      # tdc_col = tdc(times_yr, dat[[covariate]])
+      tdc_col = tdc(times_mth, dat[[covariate]])
+
+    )
+    # Rename the added column to match the covariate name
+    colnames(tmp3)[ncol(tmp3)] <- covariate
+  }
+  
+  
+  return(tmp3)
+}
+
+
+
+time_dep_Dat_original<-time_dep_func(original,stringr::str_subset(colnames(original),"L3"))
+time_dep_Dat_composite<-time_dep_func(composite,stringr::str_subset(colnames(composite),"whole"))
+
+time_Dep_cox_original<-
+lapply(stringr::str_subset(colnames(original),"L3"),function(x){
+      coxph(Surv(tstart,tstop,endpt) ~ get(x) +ageAtMetDiag + gender, data=time_dep_Dat_original,x=TRUE)
+})
+names(time_Dep_cox_original)<-stringr::str_subset(colnames(original),"L3")
+
+time_Dep_cox_composite<-
+lapply(stringr::str_subset(colnames(composite),"whole"),function(x){
+      coxph(Surv(tstart,tstop,endpt) ~ get(x) +ageAtMetDiag + gender, data=time_dep_Dat_composite,x=TRUE)
+})
+names(time_Dep_cox_composite)<-stringr::str_subset(colnames(composite),"whole")
+
+#get HR in terms of difference between moderately small to moderately big body composition difference.
+HR_original<-
+lapply(time_Dep_cox_original,function(fit){
+  
+  est<-summary(fit)$coef["get(x)","coef"]
+  se<-summary(fit)$coef["get(x)","se(coef)"]
+  pval<-summary(fit)$coef["get(x)","Pr(>|z|)"]
+  
+  get_quantile<-fit$x[,"get(x)"] |> summary()
+  diff_x<-get_quantile["3rd Qu."]-get_quantile["1st Qu."]
+  
+  #95%CI
+  
+  this.confint<-exp(diff_x*est+c(-1,1)*qnorm(0.975)*diff_x*se)
+  
+  
+  out<-sprintf("%.3f (%.3f - %.3f)",exp(diff_x*est),this.confint[1],this.confint[2])
+  if(pval<=0.05){
+    out<-paste(out,"*",sep="")
+  }
+  out
+  #Return 
+})
+HR_original<-do.call(c,HR_original)
+
+
+
+HR_composite<-
+lapply(time_Dep_cox_composite,function(fit){
+  
+  est<-summary(fit)$coef["get(x)","coef"]
+  se<-summary(fit)$coef["get(x)","se(coef)"]
+  pval<-summary(fit)$coef["get(x)","Pr(>|z|)"]
+  
+  get_quantile<-fit$x[,"get(x)"] |> summary()
+  diff_x<-get_quantile["3rd Qu."]-get_quantile["1st Qu."]
+  
+  #95%CI
+  
+  this.confint<-exp(diff_x*est+c(-1,1)*qnorm(0.975)*diff_x*se)
+  
+  
+  out<-sprintf("%.3f (%.3f - %.3f)",exp(diff_x*est),this.confint[1],this.confint[2])
+  if(pval<=0.05){
+    out<-paste(out,"*",sep="")
+  }
+  out
+  #Return 
+})
+HR_composite<-do.call(c,HR_composite)
+
+
+
+HR.dt<-data.table(
+  "Body Composition"=body_cols_pretty[c(names(HR_original),names(HR_composite))],
+  "HR (95%CI)"=c(HR_original,HR_composite)
+)
+
+
+# knitr::kable(HR.dt) |> 
+#   kableExtra::footnote(symbol=c("p-value<=0.5")) 
+
+ gt(HR.dt) |> 
+   cols_label(
+     `Body Composition`=md("**Body Composition**"),
+     `HR (95%CI)`=md("**HR (95%CI)**")
+   ) |> 
+   tab_footnote(footnote="* p-value<=0.5")
+```
+
+
+
+\
+
+
+## Joint model
+
+
+
+
