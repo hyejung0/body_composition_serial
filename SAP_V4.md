@@ -1,7 +1,7 @@
 Statistical Analysis Plan
 ================
 Hyejung Lee <hyejung.lee@utah.edu>
-Mon Mar 24, 2025 10:40:10
+Mon Mar 24, 2025 10:45:54
 
 - [Introduction](#introduction)
 - [Research Objectives](#research-objectives)
@@ -1366,7 +1366,7 @@ where:
     \log p(T_i | b_i^{(m)}) = \delta_i \left( \log h_0(T_i) + \gamma b_i^{(m)} \right) - \int_0^{T_i} h_0(u) \exp(\gamma b_i^{(m)}) du
     $$
 
-3.  **Prior on $b_i$:** $$
+3.  **Prior on** $b_i$: $$
     \log p(b_i^{(m)}) = -\frac{1}{2} \left( \frac{(b_i^{(m)})^2}{\sigma^2_b} + \log (2\pi \sigma^2_b) \right)
     $$
 
@@ -1454,9 +1454,8 @@ The algorithm **stops when either** of the following conditions is met:
 The **primary stopping criteria** follow **Equations 10 and 11** from
 the `joineRML` technical document.
 
-1.  **Relative Change Criterion (Equation 10)** $$
-    \max \left\{ \frac{|\theta^{(m+1)} - \theta^{(m)}|}{|\theta^{(m)}| + \text{tol1}} \right\} < \text{tol2}
-    $$
+1.  **Relative Change Criterion (Equation 10)**
+    $$\max \left\{ \frac{|\theta^{(m+1)} - \theta^{(m)}|}{|\theta^{(m)}| + \text{tol1}} \right\} < \text{tol2}$$
 
     where:
 
