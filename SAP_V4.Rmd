@@ -534,9 +534,10 @@ out_table3<-data.frame(
   
   
 
-flextable(out_table3) |>
-  fontsize(size = 10, part = "all")  |>
-  autofit()
+kable(out_table3)
+# flextable(out_table3) |>
+#   fontsize(size = 10, part = "all")  |>
+#   autofit()
 
 
 ```
@@ -682,7 +683,9 @@ Composite_body_composition<-rep(names(pt_missing_all_raw), times=sapply(pt_missi
 pt_missing_all_raw<-rbindlist(pt_missing_all_raw)
 pt_missing_all_raw[,Composite_body_composition:=Composite_body_composition]
 pt_missing_all_raw[,.(mrn,`Missing N`,`Total N`,Location,Composite_body_composition)]|> 
-  gt(rowname_col ="Location", "Composite_body_composition")
+  gt(rowname_col ="Location", "Composite_body_composition") |> 
+  as_raw_html()    #this is required to omit printing html source in github.
+
 
 #SAVE THE PEOPLE TO EXCLUDE
 exclude_for_composite<-unique(pt_missing_all_raw$mrn)
