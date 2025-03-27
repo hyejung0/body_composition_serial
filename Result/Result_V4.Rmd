@@ -283,7 +283,9 @@ merged_tbl <- tbl_merge(list(original_baseline_table, composite_baseline_table),
 merged_tbl |> 
   modify_footnote(
     all_stat_cols() ~ "mean (SD) and median (25th, 75th percentile) for continous variables; n (%) for categorical variables."
-  ) #|> 
+  ) |>
+  as_gt() |> 
+  as_raw_html() #this will display the table on 
   #modify_caption("**Table 1: Summary of Patient Characteristics**")
 
 
