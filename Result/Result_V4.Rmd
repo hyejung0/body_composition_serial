@@ -8,8 +8,8 @@ output:
     toc: true
     toc_depth: 5
     html_preview: true
-bibliography: references.bib
-csl: nature.csl
+bibliography: ../references.bib
+csl: ../nature.csl
 editor_options: 
   chunk_output_type: console
   markdown: 
@@ -568,7 +568,7 @@ for(x in body_cols_edit){
 
 
 
-source("myCatch.R") #function that supress error for LMER fit 
+source("../myCatch.R") #function that supress error for LMER fit 
 
 set.seed(55)
 
@@ -1602,7 +1602,7 @@ fit1_composite <- survfit(Surv(new_OS_time_yr, new_OS_ind) ~ 1, data = composite
 
 summary_fit1_original<-summary(fit1_original)$table
 summary_fit1_composite<-summary(fit1_composite)$table
-source("survfit_median_CI.R")
+source("../survfit_median_CI.R")
 survfit_median_CI(fit1_original)
 survfit_median_CI(fit1_composite)
 #Same median and confidence intervals.
@@ -1632,7 +1632,7 @@ survfit_median_CI(fit1_composite)
 #Kaplan meier curve
 #display that works for HTML.
 
-source("return_km_plot.R")
+source("../return_km_plot.R")
 
 km_plot_original<-return_km_plot(data = original_baseline, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" ) |> suppressWarnings() #Without suppressWarnings(), I still see warning printed out in html file, even with warning: false.
 km_plot_composite<-return_km_plot(data = composite_baseline, time="new_OS_time_yr",xlab_name = "Times (year)",status ="new_OS_ind" ) |> suppressWarnings()
