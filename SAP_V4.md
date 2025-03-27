@@ -1,7 +1,7 @@
 Statistical Analysis Plan
 ================
 Hyejung Lee <hyejung.lee@utah.edu>
-Thu Mar 27, 2025 13:05:13
+Thu Mar 27, 2025 13:14:08
 
 - [Introduction](#introduction)
 - [Research Objectives](#sec-RO)
@@ -84,7 +84,7 @@ of newly diagnosed mNSCLC patients.
 style="float: left; margin: 5px; width: 350px;"
 fig-cap="Spinal cord location and names.">
 
-![](spine_image.jpeg)
+![](./SAP_V4_files/figure-gfm/spine_image.jpeg)
 
 </div>
 
