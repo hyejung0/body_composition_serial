@@ -1,10 +1,10 @@
 Statistical Analysis Plan
 ================
 Hyejung Lee <hyejung.lee@utah.edu>
-Mon Mar 24, 2025 10:45:54
+Thu Mar 27, 2025 13:05:13
 
 - [Introduction](#introduction)
-- [Research Objectives](#research-objectives)
+- [Research Objectives](#sec-RO)
 - [Data](#data)
   - [Data quality](#data-quality)
   - [Baseline body composition](#baseline-body-composition)
@@ -15,8 +15,8 @@ Mon Mar 24, 2025 10:45:54
 - [Statistical methods](#statistical-methods)
   - [Missing values](#missing-values-1)
   - [Simple Models](#simple-models)
-  - [Longtiduinal body composition
-    modeling](#longtiduinal-body-composition-modeling)
+  - [Longtiduinal body composition](#sec-LMER)
+  - [Survival model](#sec-survival)
   - [Joint Models](#joint-models)
   - [Detailed explanation of Joint
     model](#detailed-explanation-of-joint-model)
@@ -70,8 +70,8 @@ of newly diagnosed mNSCLC patients.
 
 # Research Objectives
 
-1.  Model the body composition from diagnosis over the course of 1 year
-    for mNSCLC.
+1.  Model the changes in body composition from diagnosis over the course
+    of 1 year for mNSCLC.
 2.  Determine the relationship between body composition from diagnosis
     over the course of 1 year (over the first year of treatment), and
     overall survival for mNSCLC.
@@ -88,17 +88,17 @@ fig-cap="Spinal cord location and names.">
 
 </div>
 
-Data were collected from newly diagnosed mNCLC patients (N=71) from the
-Huntsman Cancer Institute from (XXXX/XX/XX to XXXX/XX/XX). This is an
-observational study where the patients’ body compositions were obtained
-from analyzing standard-of-care CT scans capturing chest down to abdomen
-(from T1, T2,…, to Sacrummid as shown
-in<sup>**fig-spinal_cord?**</sup>), using the DAFS’s automated imaging
-analysis. Specifically, our analysis focus on the four *types* of body
-compositions: intramuscular adipose tissuse, subcutaneous adipose
-tissue, visceral adipose tissue, and skeletal
-muscle.<sup>**fig-CT_scan_types?**</sup> shows CT scan of one cross
-section for these four types.
+Data were collected from newly diagnosed mNCLC patients (N=71) at the
+Huntsman Cancer Institute between YYYY/MM/DD to YYYY/MM/DD. This
+observational study utilized standard-of-care CT scans capturing images
+from the chest to abdomen (from T1, T2,…, to Sacrum;
+see<sup>**fig-spinal_cord?**</sup>), which were analyzed using DAFS’s
+automated imaging analysis. Our analysis focus on the four **types** of
+body compositions: intramuscular adipose tissue, subcutaneous adipose
+tissue, visceral adipose tissue, and skeletal muscle. A representative
+CT scan illustrating L3 cross-section of these four types is shown
+in<sup>**fig-CT_scan_types?**</sup>. For convenience, the spinal cord
+locations T1, T2,…, to sacrum will be referred to as **locations**.
 
 <div id="fig-CT_scan_types"
 style="float: right; margin: 5px; width: 350px;"
@@ -108,11 +108,11 @@ fig-cap="Spinal cord location and names.">
 
 </div>
 
-Patients’ CT scans from the date of diagnosis up to 1 year were
-analyzed. Among many body compositions analyzed by DAFS, we were only
-interested in the following body compositions at L3, which were used in
-our previous study. These 12 body compositions are to be referred to as
-**original body compositions** from hereafter to prevent confusion.:
+Patients’ CT scans, obtained from the date of metastatic diagnosis up to
+one year, were analyzed. Among many body compositions analyzed by DAFS,
+we selected L3 location that were used in our previous study. Hereafter,
+these 12 measures are referred to as original **body compositions** for
+convenience. They include:
 
 - IMAT (cm2) : Intramuscular adipose tissue area
 - IMAT (cm3) : Intramuscular adipose tissue volume
@@ -130,24 +130,22 @@ our previous study. These 12 body compositions are to be referred to as
 Additionally, we introduced 4 new body compositions which were made
 available by the DAFS analysis.:
 
-- IMAT whole body (cm3) : sum of all IMAT (cm3) values from T1 to
-  sacrummid
-- SAT whole body (cm3) : sum of all SAT (cm3) values from T1 to
-  sacrummid
-- SKM whole body (cm3) : sum of all SKM (cm3) values from T1 to
-  sacrummid
-- VAT whole body (cm3) : sum of all VAT (cm3) values from T1 to
-  sacrummid
+- IMAT whole body (cm3) : sum of all IMAT (cm3) values from locations T1
+  to Sacrum
+- SAT whole body (cm3) : sum of all SAT (cm3) values from locations T1
+  to Sacrum
+- SKM whole body (cm3) : sum of all SKM (cm3) values from locations T1
+  to Sacrum
+- VAT whole body (cm3) : sum of all VAT (cm3) values from locations T1
+  to Sacrum
 
-These four body compositions are *composite* variables, where volumes
-(cm3) of each section from T1 through sacrummid were added to estimate
-total volume of body compositions in the midsection of body. They will
-be referred to as **composite body compositions** hereafter to prevent
-confusion. <span style="color:red;">We decided to add these four
-composite body compositions in our study because we believed that total
-volume of each type of body compositions would be more strongly
-associated with survival than just a single section of spinal cord.
-(check with Adriana. Is this right?)</span>
+These composite variables represent the total volume $(cm^3)$ of each
+body composition type in the midsection of the body and will be referred
+to as **composite** body compositions. <span style="color:red;">We
+decided to add these four composite body compositions in our study
+because we believed that total volume of each type of body compositions
+would be more strongly associated with survival than just a single
+section of spinal cord. (check with Adriana. Is this right?)</span>
 
 ## Data quality
 
@@ -166,7 +164,8 @@ DAFS analysis of scans taken within -60 to +30 days of diagnosis date.
 ## Outcome
 
 We have two outcome of interest, which are longitudinal body
-compositions and survival. There are 16 longitudinal body composition
+compositions and survival. As noted in the beginning
+of<sup>**sec-Data?**</sup>, there are 16 longitudinal body composition
 outcomes, 12 original body compositions and 4 composite body
 compositions.
 
@@ -234,11 +233,11 @@ in the order missing the most from top to bottom.
 
 <figure>
 <img src="SAP_V4_files/figure-gfm/fig-missing_prop-1.png"
-alt="Proportion of missing for each body composition used for analysis. Note that the body compositions that are generated by summing volume of each cross-section are not included in this plot." />
-<figcaption aria-hidden="true">Proportion of missing for each body
-composition used for analysis. Note that the body compositions that are
-generated by summing volume of each cross-section are not included in
-this plot.</figcaption>
+alt="Figure XX. Proportion of missing for each body composition used for analysis. Note that the body compositions that are generated by summing volume of each cross-section are not included in this plot." />
+<figcaption aria-hidden="true">Figure XX. Proportion of missing for each
+body composition used for analysis. Note that the body compositions that
+are generated by summing volume of each cross-section are not included
+in this plot.</figcaption>
 </figure>
 
 <div style="border: 1px solid #ddd; padding: 0px; overflow-y: scroll; height:400px; ">
@@ -1100,16 +1099,11 @@ between first and second scan are different!
 
   
 
-## Longtiduinal body composition modeling
+## Longtiduinal body composition
 
 To assess the patterns of body composition over time, we will fit linear
 mixed effects (LME) model on each body composition on time along with
-the confounders. We will first plot each body composition over time to
-see if we can fit body compositions linearly over time, or if some
-smooth transformation is required. If clearly non-linear pattern is
-observed, we will employ natural splines transformation over time, and
-compare with linear time fitting to determine the modeling choice.
-Here’s the steps:
+the confounders. Here’s a walk-through.:
 
 1.  For each body composition, check for normality assumption required
     for fitting LME by plotting density plot of histogram. For example,
@@ -1119,28 +1113,54 @@ Here’s the steps:
 2.  For each body composition, fit two models that uses different
     functional form of time: (i) fitting body composition as a linear
     function of time, and (ii) fitting Y using a flexible nonlinear
-    function of time via natural cubic splines. Choose the most suitable
-    functional form to for describing changes in body composition by
-    comparing statistical test (Akaike information criterion (AIC)) and
-    graphical test (plot of residuals vs time).
-3.  Next, evaluate the significance of age at metastatic diagnosis using
-    analysis of variance (ANOVA) for each different BC. Thus evaluation
-    was performed to determine whether inclusion of age was necessary,
-    especially considering our goal of visualizing the relationship
-    between BC and time at would be complicated by need to decide what
-    specific value of age should the plot be provided. After correcting
-    for multiple comparisons using the False positive discovery rate
-    (pFDR) procedure with a significance threshold of q \< 0.05. If any
-    one of the models find significance in age, keep age in all models
-    to maintain consistency and avoid confusion in our visualizations
-    and interpretations.
-4.  For presentation of the result, provide fitted curve plots
-    separately for male and female, and for 25th, median and 75th
-    percentile of age (if age was kept). If we used linear function of
-    time for model fitting, provide estimate and 95% confidence interval
-    also.
+    function of time via natural cubic splines. We are trying to
+    identify the relationship between time and body composition. The
+    first model fits linear assocation, and the second model allows for
+    non-linear assocation. The most suitable functional form will be
+    selected based on an analysis of variance (ANOVA) test and graphical
+    diagnostics (i.e., residuals vs. time plot). Multiple comparisons
+    will be adjusted using the false positive discovery rate (pFDR)
+    procedure with a significance threshold of $q \leq 0.05$.
+3.  Next, we will assess the significance of age at metastatic diagnosis
+    using ANOVA for each body composition. This step will determine
+    whether the inclusion of age is warranted, especially since
+    visualizing the relationship between body composition and time could
+    be complicated by the need to select a specific age value. After
+    correcting for multiple comparisons using the pFDR procedure (with
+    $q \leq 0.05$), if age is found to be significant in any model, it
+    will be retained in all models to maintain consistency and clarity
+    in the visualizations and interpretations.
+4.  We will evaluate the significance of the interaction between gender
+    and time to explore whether the rate of change in body composition
+    over time differs between males and females. This interaction term
+    will be assessed using the same statistical approach as described
+    for age.
+5.  Similarly, we will assess the significance of the interaction
+    between baseline age and time, to determine if the rate of change in
+    body composition over time varies with baseline age. The
+    significance of this interaction will be evaluated in a manner
+    analogous to that used for age and gender interactions.
+6.  For the presentation of the results, we will generate plots of
+    expected values over the course of 1 year with their 95% confidence
+    intervals, stratified by gender. In each plot, baseline age will be
+    fixed at a representative value. For models where baseline age is
+    significant, three panels will be produced corresponding to fixed
+    baseline ages at the 25th, 50th (median), and 75th percentiles of
+    the observed sample.
 
   
+
+## Survival model
+
+To assess the association between serial body scan and survival, we will
+perform the following.
+
+1.  Show marginal survival probability over time of all patients using
+    Kaplan-Meier plot
+2.  For each body composition, fit time-dependent Cox PH model, adjusted
+    by the baseline covariates.
+3.  Provide the hazard ratio (95% confidence interval) between the
+    moderately high and moderately low body composition measurement.
 
 ## Joint Models
 
