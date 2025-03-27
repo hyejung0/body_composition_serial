@@ -1,0 +1,1252 @@
+---
+title: "Statistical Analysis Plan"
+subtitle: "version 4"
+author: "Hyejung Lee <hyejung.lee@utah.edu>"
+date: "`r format(Sys.time(), '%a %b %d, %Y %X')`"
+output:
+  github_document:
+    toc: true
+    toc_depth: 5
+    html_preview: true
+bibliography: ../references.bib
+csl: ../nature.csl
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: 72
+always_allow_html: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache=TRUE, message = FALSE,warning=FALSE)
+library(data.table)
+library(table1)
+library(ggplot2)
+library(gridExtra)
+library(purrr)
+library(ggpubr)
+library(survival)
+library(nlme)
+library(JM)
+library(nlme)
+library(survival)
+library(mice)
+library(VIM)
+library(knitr)
+library(kableExtra)
+library(zoo)
+library(flextable)
+library(gt)
+```
+
+This SAP is made after I started working with Ann. To help me finish the
+project.
+
+\
+
+# Introduction
+
+Body compositions have been identified to be associated with survival of
+metastatic non-small cell lung cancer (mNSCLC) patients. Recent evidence
+suggests that body composition variables (e.g., skeletal muscle mass and
+fat mass) may serve as independent prognostic factors of overall
+survival in varying cancer types and stages, including metastatic lung
+cancer. Work from our group reveals a 63% (0.37 HR, 95%CI 0.16, 0.87)
+and 43% (0.57 HR, 95%CI 0.35, 0.93) reduction in mortality risk with
+greater muscle and fat mass, respectively, at time of mNSCLC diagnosis.
+
+The purpose of the present investigation is to evaluate the relationship
+between body composition, as measured with the new DAFS software, at
+diagnosis and changes throughout treatment, and overall survival among
+mNSCLC patients, by utilizing serial CT scans from a convenience sample
+of newly diagnosed mNSCLC patients.
+
+\
+
+# Research Objectives {#sec-RO}
+
+1. Model the changes in body composition from diagnosis over the course of 1 year for mNSCLC. 
+2. Determine the relationship between body composition from diagnosis over the course of 1 year (over the first year of treatment), and overall survival for mNSCLC. 
+
+\
+
+# Data
+
+::: {#fig-spinal_cord style="float: left; margin: 5px; width: 350px;" fig-cap="Spinal cord location and names."}
+![](./spine_image.jpeg)
+:::
+
+  Data were collected from newly diagnosed mNCLC patients (N=71) at the Huntsman Cancer Institute between YYYY/MM/DD to YYYY/MM/DD. This observational study utilized standard-of-care CT scans capturing images from the chest to abdomen (from T1, T2,..., to Sacrum; see @fig-spinal_cord), which were analyzed using DAFS's automated imaging analysis. Our analysis focus on the four **types** of body compositions: intramuscular adipose tissue, subcutaneous adipose tissue, visceral adipose tissue, and skeletal muscle. A representative CT scan illustrating L3 cross-section of these four types is shown in @fig-CT_scan_types. For convenience, the spinal cord locations T1, T2,..., to sacrum will be referred to as **locations**.
+  
+  
+::: {#fig-CT_scan_types style="float: right; margin: 5px; width: 350px;" fig-cap="Spinal cord location and names."}
+![](./CT_scan_types.jpg)
+:::
+
+
+  Patients' CT scans, obtained from the date of metastatic diagnosis up to one year, were analyzed. Among many body compositions analyzed by DAFS, we selected L3 location that were used in our previous study. Hereafter, these 12 measures are referred to as original **body compositions** for convenience. They include:
+
+-   IMAT (cm2) : Intramuscular adipose tissue area
+-   IMAT (cm3) : Intramuscular adipose tissue volume
+-   IMAT (mean HU) : Intramuscular adipose tissue density
+-   SAT (cm2) : Subcutaneous adipose tissue area
+-   SAT (cm3) : Subcutaneous adipose tissue volume
+-   SAT (mean HU) : Subcutaneous adipose tissue density
+-   SKM (cm2) : Skeletal muscle area
+-   SKM (cm3) : Skeletal muscle volume
+-   SKM (mean HU) : Skeletal muscle density
+-   VAT (cm2) : Visceral adipose tissue area
+-   VAT (cm3) : Visceral adipose tissue volume
+-   VAT (mean HU) : Visceral adipose tissue density
+
+
+Additionally, we introduced 4 new body compositions which were made available by the DAFS analysis.:
+
+- IMAT whole body (cm3) : sum of all IMAT (cm3) values from locations T1 to Sacrum
+- SAT whole body (cm3) : sum of all SAT (cm3) values from locations T1 to Sacrum
+- SKM whole body (cm3) : sum of all SKM (cm3) values from locations T1 to Sacrum
+- VAT whole body (cm3) : sum of all VAT (cm3) values from locations T1 to Sacrum
+
+
+These composite variables represent the total volume $(cm^3)$ of each body composition type in the midsection of the body and will be referred to as **composite** body compositions. [We decided to add these four composite body compositions in our study because we believed that total volume of each type of body compositions would be more strongly associated with survival than just a single section of spinal cord. (check with Adriana. Is this right?)]{style="color:red;"} 
+
+
+
+## Data quality
+
+Initially, I was concerned that alot of chest scan values of VAT (cm3)
+having zeros. I emailed Jeff and Adriana about this, and see if this is
+expected value physiologically. I heard back from Jeff on Monday Feb 24,
+2025, that this is expected. VAT should mostly be deposited around the
+abdomen and pelvis. So I decided to generate VAT whole body (cm3) just
+fine.
+
+```{r}
+#| include: false
+#| eval: false
+#| label: tbl-data-quality
+#| tbl-cap: Proportion of missing for each body composition used for analysis. Note that the body compositions that are generated by summing volume of each cross-section are not included in this plot.
+
+#data quality check.
+#shows table of Chest scan values of VAT (cm3), as alot of them are zeros.
+
+dat_raw<-readRDS("../dat_new_death_times.rds")
+
+#read in data dictionary for composite endpoint.
+dat_dict<-fread("../../Documents/variables_dictionary.csv",na.strings = c("", NA))
+dat_dict<-na.locf(dat_dict)
+
+#Extract columns for each types of body composition
+#"IMAT- Whole abdomen + chest volume  (sum of these variables)"
+IMAT_ab_chest_cols<-dat_dict[`Variable Category`=="IMAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"SAT- Whole abdomen + chest volume  (sum of these variables)"
+SAT_ab_chest_cols<-dat_dict[`Variable Category`=="SAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"SKM- Whole abdomen + chest volume  (sum of these variables)"
+SKM_ab_chest_cols<-dat_dict[`Variable Category`=="SKM- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"VAT- Whole abdomen + chest volume  (sum of these variables)"
+VAT_ab_chest_cols<-dat_dict[`Variable Category`=="VAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+
+raw_col_names<-list(
+  IMAT=IMAT_ab_chest_cols,
+  SAT=SAT_ab_chest_cols,
+  SKM=SKM_ab_chest_cols,
+  VAT=VAT_ab_chest_cols
+)
+
+# dat_raw[,sapply(.SD,function(x)sum(x==0,na.rm = T)/nrow(dat_raw)),.SDcols=IMAT_ab_chest_cols]|> (\(y) which(y != 0))()
+# dat_raw[,sapply(.SD,function(x)sum(x==0,na.rm = T)/nrow(dat_raw)),.SDcols=SAT_ab_chest_cols]|> (\(y) which(y != 0))()
+# dat_raw[,sapply(.SD,function(x)sum(x==0,na.rm = T)/nrow(dat_raw)),.SDcols=SKM_ab_chest_cols]|> (\(y) which(y != 0))()
+# dat_raw[,sapply(.SD,function(x)sum(x==0,na.rm = T)/nrow(dat_raw)),.SDcols=VAT_ab_chest_cols]|> (\(y) which(y != 0))()
+
+
+#Concern with VAT
+zero_cols_VAT<-dat_raw[,sapply(.SD,function(x)sum(x==0,na.rm = T)/nrow(dat_raw)),.SDcols=VAT_ab_chest_cols] |> (\(y) which(y != 0))() |> names()
+# dat_raw[,.SD,.SDcols = c("mrn","StudyDate",zero_cols_VAT)]
+
+
+# 
+# #Below here are the serialized scan data
+# #comprehensive file
+# # comp_scan<-fread("../../../../LCC Pilot Grant Project 2024/Data/Comprehensive Analysis/Publish_by_scan_2024-02-23_16.57.54.389.csv",nThread=4) 
+# comp_scan<-fread("../../../../LCC Pilot Grant Project 2024/Data/Comprehensive Analysis/Updated Results 4-22-2024/Publish_by_scan_2024-11-08_06.49.32.807_JY.csv",nThread=4) 
+# comp_id<-comp_scan$PatientID|> unique()
+# 
+# #The data is too big. We will subset the data so we don't have such as big data. 
+# #Adriana provided columns that we need to use. 
+# dat_dict<-fread("../Documents/variables_dictionary.csv",na.strings = c("", NA))
+# library(zoo)
+# dat_dict<-na.locf(dat_dict)
+# stringr::str_subset(colnames(comp_scan),";", negate = F) |> length() #16368 body composition names
+# select_comp_scan<-c(stringr::str_subset(colnames(comp_scan),";", negate = T), #Column names that are not body parts scans.
+#                     unique(dat_dict$`Variable Name`))
+# comp_scan<-comp_scan[,.SD,.SDcols=select_comp_scan]
+# #convert to numeric
+# scan_cols<- unique(dat_dict$`Variable Name`)
+# comp_scan[,(scan_cols):=lapply(.SD,as.numeric),.SDcols=scan_cols]
+# 
+# 
+# write.csv(comp_scan[PatientID%in%pt_id, .SD,.SDcols=c("PatientID","StudyDate","BodyPartExamined",zero_cols_VAT)],
+#           "zeros_VAT.csv",
+#           row.names = F)
+
+knitr::kable(dat_raw[,.SD,.SDcols = c("mrn","StudyDate",zero_cols_VAT)]) |> 
+  kable_styling(full_width = TRUE) |> 
+  scroll_box(height="500px")
+
+
+```
+
+## Baseline body composition
+
+As in our previous study, we defined baseline body composition to be
+DAFS analysis of scans taken within -60 to +30 days of diagnosis date.
+
+## Outcome
+
+We have two outcome of interest, which are longitudinal body compositions and survival. As noted in the beginning of @sec-Data, there are 16 longitudinal body composition outcomes, 12 original body compositions and 4 composite body compositions.
+
+
+## Confounder
+
+[Adriana should provide why age, race/ethnicity, and sex are confounding
+variable between body composition and time, and between body composition
+and survival.]{style="color:red;"}
+
+Race/ethnicity was also identified as a confounder. However, the
+majority were non-Hispanic White (41/48), while the remaining 7 patients
+were missing information. Due to the overwhelming proportion of
+non-Hispanic White patients and the lack of complete ethnicity data for
+the remaining patients, the race/ethnicity variable was excluded from
+modeling.
+
+## Cohort selection
+
+Below are exclusion criteria:
+
+-   N=71 -\> 65: Should have scans within 1 year of metastatic diagnosis
+    and have scans after diagnosis Does not have any scans (6 patients
+    did not meet this criteria)
+
+-   N=65 -\> 55: Have CT scans for abdomen that can be paired with chest
+    scans. Pairing meaning that there are abdomen and chest scans within
+    1 week of each other (10 patients did not meet this criteria)
+
+-   N=55 -\> 50: Have CT scan reading with at least 2 longitudinal
+    measurements (5 patients did not meet this criteria. Four patients
+    didn't have any scans. One patient had only 1 scan.)
+
+-   N=50 -\>48: Due to data discrepancy, two patients were removed
+    because the baseline scans did not fall within (-60, +30) days since
+    metastatic diagnosis date.
+
+Therefore, we have total 48 patients to analyze (equivalent to 201
+observations).
+
+```{r, include=FALSE, eval=FALSE}
+
+#In the original data set in non-serialized data, we started with 80 people
+
+#we excluded 8 people b/c their CT scan sit outside of -60 & +30 window of the metastatic date. Leaving us 72 samples. Excluded mrn: 21047343, 19298934, 10674422, 21180176, 21122218,  1513316, 20982783, 21045178
+
+# Further excluded 1 person due to having value 0 for Area(cm2)_SAT. Excluded mrn=3358512. Leaving us 71 samples.
+
+# Adriana sent me all scan dates (1yr after diagnosis) body. Body composition serial/Analysis/BCserial_v1/0.Data.R file
+# I found out that 6 patients didn't have any scans within 1 year of metastatic diagnosis, so I excluded them. leaving us with 65 patients. Excluded mrn:  21197586, 10909364,  2631141, 21039659, 21077824, 20467959.
+
+#I worked on paring all chest with abdomen scans of the 65 patients. 10 patinents did not have any ab + chest pair so.... Got removed. Left us with 55 patients. Excluded mrn: 7203862,  9461468, 10069565, 16185811, 17291931, 20389941, 21057136, 21060857, 21105657, 21225010 
+
+# Jeff got back to me with 51 patients only. That means that 4 patients failed image analysis.  Jeff told me that image analysis failed on 4 patients. Excluded mrn: 8234676, 16740318, 17518028, 20919028
+# Line 37 of Body composition serial/Code/0.Data.R
+
+#One person has only one scan. I think it's just also the CT imaging failing. leaving us with 50 patient. Excluded mrn: 21115960
+# Line 77 of Body composition serial/Code/0.Data.R
+
+#One person's metastatic date was changed by Wally during our revision of the first paper. With this revision, their baseline scan does not fall in -60 +30 window in the serialized data. So this person is removed. Leaving us with sample size of 49. Excluded mrn=20895589
+# Line 83 of Body composition serial/Code/0.Data.R
+
+#One person's baseline scan date sits outside of -60 + 30 days. excluded. leaving us with 48 sample size. Excluded mrn =7042591. 
+# Line 260 of Body composition serial/Code/0.Data.R file.
+
+```
+
+## Missing values
+
+Some body compositions are missing due to low quality of CT scans.
+Handling of these missing values can be found in Statistical methods
+section.
+
+\
+
+# Statistical methods
+
+## Missing values
+
+In this section, we explain the method of handling missing body
+compositions.
+
+<!-- For any given day, patient could have received either a whole body scan, or a separate CHEST and ABDOMEN scans. For the purposes of our study, we decided to pair the chest abdomen scan results as if they are taken on a same day if they are only 7 days apart. Our assumption here is that the body composition should not have drastically changed within 7 days. In this case, we fixed the date of scan to be when the chest scan was taken. From here and onward, we will say that chest and abdomen are taken on the same day. -->
+
+<!-- The unit of observation is patient-date-scan. That is, if a patient got chest and abdomen scan on a same day, there are two rows for the patient, one for each scan. Suppose that the chest scan was meant to capture from T1 down to L3, and T11 down to L5 for the abdomen scan. There is an overlap of scanning areas from T11 to L3 between the chest and abdomen scans. These overlapping region was used to impute missing values. That is, suppose that the chest scan is missing values for T11 or T12 for some unknown reason. Then, these values can be imputed from the corresponding abdomen scan is these values are not missing from the abdomen scan. By doing so, we can capture the complete values for the chest scans from T1 through L3. This type of filling in the missing value is not what statisticians typically refer to as "imputation." We are filling in the missing values (missing from the machine readouts) of a scan with "true" values from another scan. -->
+
+Some body compositions were missing due to failed imaging analysis of
+the CT scans. However, the mechanism of failing is unknown. Thus, the
+missing mechanism is missing completely at random (MCAR). To identify
+how to handle the missing values, we decided to summarize the body
+compositions with missing values. @tbl-missing_prop shows percent
+missing (out of 201 scans) for each of 80 raw body composition, in the
+order missing the most from top to bottom.
+
+```{r fig.show="hold", cache=TRUE, fig.width=14, fig.height=7}
+#| label: fig-missing_prop
+#| code-fold: true
+#| echo: false
+#| fig-cap: "Figure XX. Proportion of missing for each body composition used for analysis. Note that the body compositions that are generated by summing volume of each cross-section are not included in this plot."
+
+dat<-readRDS("../dat_new_death_times.rds") #non-imputed data
+
+#Show number of missing
+body_cols_names<-readRDS("../body_cols_names.rds")
+
+#rename it
+new_body_names<-
+  sapply(body_cols_names,function(x){
+    
+    pieces_x<-strsplit(x,";")[[1]]
+    #get rid of mid
+    pieces_x[1]<-stringr::str_remove(pieces_x[1],"mid")
+    
+    if("cross_sectional_area_cm2" %in% pieces_x){
+      paste(pieces_x[1],pieces_x[2],"(cm2)",sep=" ")
+      
+    }else if("volume_cm3" %in% pieces_x){
+      paste(pieces_x[1],pieces_x[2],"(cm3)",sep=" ")
+      
+    }else if("HU_mean" %in% pieces_x){
+      paste(pieces_x[1],pieces_x[2],"(mean HU)",sep=" ")
+      
+    }else if(stringr::str_detect(string = x,pattern = "whole")){
+      pieces_x2<-strsplit(x,"_")[[1]]
+      
+      paste(pieces_x[1],pieces_x2[1],"(whole body cm3)",sep=" ")
+    }
+    
+  })
+#order by natural location
+num_missing<-dat[,sapply(.SD,function(x)sum(is.na(x))), .SDcols = body_cols_names]
+prop_missing<-dat[,sapply(.SD,function(x)mean(is.na(x))), .SDcols = body_cols_names]
+
+#Identify column names with missing values
+body_comp_cols<-names(num_missing)[num_missing>0] #turns out they are all body compositions
+
+
+miss_dat<-
+data.table("body_comp"=new_body_names,
+           "N"=num_missing,
+           "prop"=prop_missing)
+
+#order by missing proportion
+miss_dat<-miss_dat[order(prop,decreasing = T),]
+
+#Factorize for plotting
+miss_dat[,body_comp:=factor(body_comp, levels = body_comp,labels=body_comp)]
+
+library(ggplot2)
+p<-ggplot(miss_dat)+
+  geom_col(aes(x=body_comp,y=prop))+
+  theme_minimal() +  # Use a minimal theme
+  xlab("Body composition")+
+  ylab("Proportion of missing observations")
+p+theme(axis.text.x=element_text(angle = 90, hjust = 0, vjust=1))
+
+  # theme(
+  #   text = element_text(size = 14),  # Increase text size
+  #   axis.title = element_text(face = "bold"),  # Bold axis titles
+  #   axis.text = element_text(color = "black"),  # Black axis text
+  #   panel.grid.major = element_line(color = "grey80"),  # Light grey grid lines
+  #   panel.grid.minor = element_blank(),  # Remove minor grid lines
+  #   legend.position = "none"  # Remove legend
+  # ) 
+
+# # md.pattern(dat[,.SD,.SDcols=body_cols_names ])
+# 
+# # Missingness pattern can also be visualised in VIM package by
+# dat_aggr <- aggr(dat, col=mdc(1:length(body_cols_names)), numbers=TRUE, prop = TRUE,sortVars=TRUE, labels=new_body_names, cex.axis=.7, gap=3, ylab=c("Proportion of missingness","Missingness Pattern"))
+
+```
+
+```{r}
+#| echo: FALSE
+#| label: tbl-missing_prop
+#| tbl-cap: N (%) of missing proportion of body compositions.
+
+#Table of missing proportion
+miss_dat[,percent:=prop*100]
+miss_dat[,`N (%)`:=sprintf("%.0f (%0.2f%%)", N, percent)]
+setnames(miss_dat,"body_comp","Body Composition")
+
+
+#Print ltable
+# gt(miss_dat[,.(`Body Composition`, `N (%)`)])
+knitr::kable(miss_dat[,.(`Body Composition`, `N (%)`)]) |> 
+  kable_styling(full_width = FALSE) |> 
+  scroll_box(height="400px")
+
+# # Render scrollable datatable with 6 visible rows
+# DT::datatable(miss_dat[,.(`Body Composition`, `N (%)`)], options = list(
+#   pageLength = 7,   # Show only 7 rows per page
+#   scrollY = "300px" # Enable vertical scrolling with a height of 300px
+# ))
+
+
+setnames(miss_dat,"Body Composition","body_comp")
+miss_dat<-data.frame(miss_dat, check.names = F)
+
+
+```
+
+\
+
+It's a bit hard to identify patterns because we have in total
+`r nrow(miss_dat)` raw body compositions are are used as original body
+composition and used to generate composite body compositions. So we
+decided to first look at the patterns of 12 original body compositions.
+We realized that only 8/201 scans are missing 12 original body
+compositions. Also, all 12 of them are missing all together.
+@tbl-missing-original-pattern, shows the number of scans missing for
+each patient for the original body compositions. 6 patients had missing
+values, where 3 missing values come from one patient.
+
+```{r missing-original-pattern}
+#| echo: false
+#| label: tbl-missing-original-pattern
+#| tbl-cap: "Number of missing scan of original body compositions. Each row belongs to differente patient. 'Missing N' refers to number of missing scans and 'Total N' refers to number of total scans. Note that if any one of the original body compositions is missing, then all original body compositions are missing. That is, if a patient had a missing L3 IMAT (cm2) output from a single scan, then the scan is missing all output for L3 section."
+
+#Read in data
+dat_raw<-readRDS("../dat_new_death_times.rds")
+
+
+#12 raw longitudinal outcomes
+raw_body_comp_vars<-stringr::str_subset(colnames(dat_raw),"L3")
+
+#For each row, find how many of 12 original body compositions they are missing
+# apply(dat_raw[,.SD,.SDcols = raw_body_comp_vars],1,function(x)sum(is.na(x)))
+#for each row, all 12 origianl body compositions are missing
+tmp<-apply(dat_raw[,.SD,.SDcols = raw_body_comp_vars],1,function(x)sum(is.na(x)))
+# sum(tmp>0) #8 rows
+#How many people?
+tmp2<-dat_raw[which(tmp>0),.N,by=mrn]
+setnames(tmp2,"N","Missing N")
+tmp3<-dat_raw[mrn %in% tmp2$mrn,.N,by=mrn]
+setnames(tmp3,"N","Total N")
+tmp4<-merge(tmp2,tmp3,by="mrn")
+
+
+# gt(tmp4[,.(`Missing N`, `Total N`)])
+kable(tmp4[,.(`Missing N`, `Total N`)])
+
+
+# flextable(tmp4[,.(`Missing N`, `Total N`)]) |>
+#   fontsize(size = 11, part = "all")  |>
+#   autofit()
+
+```
+
+It is more complicated to explore missing patterns for the composite
+body compositions. Each of the composite body composition is generated
+as a sum of 18 raw scan output columns. For example,
+`IMAT whole body (cm3)` is sum of entries from
+`T1 IMAT cm3 + T2 IMAT cm3 + ...T12 IMAT cm3 + L1 IMAT cm3 + ... + L5 IMAT cm3 + Sacrum IMAT cm3`.
+Thus, technically speaking, if any one of these columns are missing
+values, then `IMAT whole body (cm3)` cannot be defined.
+
+So we first checked patterns of missing values for each raw body
+composition. Unfortunately the missing pattern is not as nice as those
+of original body compositions. So we just provided a summary of number
+of missing raw body compositions for each composite body composition in
+@tbl-missing-composite-pattern. For example, the column 'IMAT whole body
+(cm3)' shows the number of missing raw body composition. There are 103
+scans that did not miss any of the raw body composition. At most, 10/18
+raw body compositions were missing, but such was observed from only 2
+scans. The majority of scans are missing at most 0-3 raw body
+compositions for all four composite body compositions. Thus, using only
+complete cases come at great cost of excluding observed data. Also, it
+seems like the same person is missing everything across all table. The
+missing composition is the same for all composite BCs.
+
+```{r missing-composite-pattern}
+#| echo: false
+#| label: tbl-missing-composite-pattern
+#| tbl-cap: "Number (%) of missing 18 raw body compositions used to generate the composite body compositions. Each row corresponds to the number of missing observation per scan. For example, the column 'IMAT whole body (cm3)' shows the number of missing raw body composition per scan. There are 103 scans that did not miss any of the raw body composition. At most, 10/18 raw body compositions were missing, but such was observed from only 2 scans."
+
+
+#missing values for composite endpoints
+
+#Read in data
+dat_raw<-readRDS("../dat_new_death_times.rds")
+
+#read in data dictionary for composite endpoint.
+dat_dict<-fread("../../Documents/variables_dictionary.csv",na.strings = c("", NA))
+dat_dict<-na.locf(dat_dict)
+
+#Extract columns for each types of body composition
+#"IMAT- Whole abdomen + chest volume  (sum of these variables)"
+IMAT_ab_chest_cols<-dat_dict[`Variable Category`=="IMAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"SAT- Whole abdomen + chest volume  (sum of these variables)"
+SAT_ab_chest_cols<-dat_dict[`Variable Category`=="SAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"SKM- Whole abdomen + chest volume  (sum of these variables)"
+SKM_ab_chest_cols<-dat_dict[`Variable Category`=="SKM- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+#"VAT- Whole abdomen + chest volume  (sum of these variables)"
+VAT_ab_chest_cols<-dat_dict[`Variable Category`=="VAT- Whole abdomen + chest volume  (sum of these variables)", `Variable Name`]
+
+raw_col_names<-list(
+  IMAT=IMAT_ab_chest_cols,
+  SAT=SAT_ab_chest_cols,
+  SKM=SKM_ab_chest_cols,
+  VAT=VAT_ab_chest_cols
+)
+
+#Check pattern of missing 
+tmp<-
+lapply(raw_col_names,function(raw_col_names_for_one_type){
+  apply(dat_raw[,.SD,.SDcols = raw_col_names_for_one_type],1,function(x)sum(is.na(x)))
+})
+# unique(tmp$IMAT) #[1]  0  1  2  3 12  4  7  9 10
+# unique(tmp$SAT)#[1]  0  1  2  3 12  4  7  9 10
+# unique(tmp$SKM)#[1]  0  1  2  3 12  4  7  9 10
+# unique(tmp$VAT)#[1]  0  1  2  3 12  4  7  9 10
+#each scan has different number of missing. 
+#The most missing is 10/18. 
+#It's not just 0 or 18. 
+#so no. The missing pattern is not like original body compositions
+# unique(tmp$SAT)
+# unique(tmp$SKM)
+# unique(tmp$VAT)
+#similarly for all other types
+#Missingness is varying per scan
+
+#generate proportion missing 
+num_missing<-matrix(NA, nrow=4,ncol=(1+length(VAT_ab_chest_cols)))
+rownames(num_missing)<-names(tmp)
+colnames(num_missing)<-c(0,1:length(VAT_ab_chest_cols))
+for(i in 1:length(tmp)){
+  tmp2<-tmp[[i]]
+
+  obs_num_missing<-table(tmp2)
+  
+  count_num_missing<-rep(0,ncol(num_missing))
+  names(count_num_missing)<-colnames(num_missing)
+  count_num_missing[names(obs_num_missing)]<-obs_num_missing
+  num_missing[i,]<-count_num_missing
+  
+}
+
+prop_missing<-num_missing/nrow(dat_raw)
+percent_missing<-prop_missing*100
+
+
+out_table<-matrix(NA, nrow=4,ncol=(1+length(VAT_ab_chest_cols)))
+rownames(out_table)<-names(tmp)
+colnames(out_table)<-c(0,1:length(VAT_ab_chest_cols))
+
+for(i in 1:nrow(prop_missing)){
+  for(j in 1:ncol(prop_missing)){
+    out_table[i,j]<-sprintf("%0.0f (%0.1f)",num_missing[i,j],percent_missing[i,j])
+    
+  }
+}
+
+rownames(out_table)<-paste(rownames(out_table),"whole body (cm3)")
+# kable(out_table)
+
+
+# Use for word doc
+out_table2<-data.frame(
+  "Composite body composition"=rownames(out_table),
+  out_table,
+  check.names = FALSE
+  )
+#Transpose for readability
+out_table3<-data.frame(
+  "Number missing raw body compositions"=rownames(t(out_table)),
+  t(out_table),
+  check.names = FALSE
+  )
+  
+  
+
+kable(out_table3)
+# flextable(out_table3) |>
+#   fontsize(size = 10, part = "all")  |>
+#   autofit()
+
+
+```
+
+I'm not printing off my code, but I checked that for each scan, if it is
+missing any raw body composition, then it is missing all outputs across
+the 4 types. That is, let's say if a scan is missing T1 at IMAT, then it
+is missing T1 for all SAT, VAT, and SKM.
+
+```{r}
+#| include: false
+#| eval: true
+#| echo: false
+
+
+#For each scan, look at if it's missing any raw composition, is it missing all types of BC. 
+#That is, if a scan is missing T1 at IMAT, is it missing T1 for all SAT, VAT, and SKM?
+#I've run this chunk of code. And the answer is yes.
+
+
+raw_col_names_vector<-c(
+  IMAT=IMAT_ab_chest_cols,
+  SAT=SAT_ab_chest_cols,
+  SKM=SKM_ab_chest_cols,
+  VAT=VAT_ab_chest_cols
+)
+
+
+names_is_NA<-apply(dat[,.SD,.SDcol=raw_col_names_vector],1,function(x)raw_col_names_vector[is.na(x)])
+summary_where_NA<-
+lapply(names_is_NA,function(each_row){
+  #Remove everything before mid;
+  location<-sub('mid.*$', '', each_row)
+  #Extract types
+  types<-stringr::str_extract(each_row, "(?<=;)[^;]+")
+
+  #Extract unite
+  unit <- stringr::str_extract(each_row, "[^;]+$")
+  data.table(location,types,unit)
+}) #This shows me if the missing location is the same. 
+# Remove empty data.tables
+summary_where_NA <- Filter(nrow, summary_where_NA)
+
+#For each person missing anyting 
+#Find the number of unique location and number of unique types
+summary_where_NA_unique<-
+lapply(summary_where_NA,function(dat){
+  
+  #Number of unique location missing 
+  dat[,.N,by=.(location,unit)]
+  #Return if for each location, all types (IMAT,SAT,SKM, and VAT) are missing 
+})
+#We really didn't need unit because we selected only Volume for our compoite BC.
+summary_where_NA_unique
+
+#Check if all N=4. 
+sapply(summary_where_NA_unique,function(dat){
+  dat[,N==4]
+  ifelse(any(dat[,N==4])==FALSE,"No, not all location is missing all types","Yes all location is missing all types")
+}) |> table()
+
+#Okay for any scan, if it's missing any location, let's day T2, it's missing all T2 IMAT, SKM, SAT, and VAT.
+#for example,
+
+summary_where_NA_unique[[86]] #this is for a single scan.
+#This scan has missing values from T1 to T8. 
+#If it is missing T1 value, it is missing T1 IMAT, T2 SKM, etc. 
+#Thus, validating the fact that if the image is not good, it can't evaluate any types of body composition. 
+
+```
+
+Since most of the raw body compositions are observed, we thought we
+should use them by imputing the raw body compositions.
+
+We will impute using mean value for each person. So if there are any
+patients missing all scan values for any raw body compositions, we will
+have to exclude them from the daset.
+
+@tbl-missing_all_raw shows patients missing all scan values of raw body
+compositions for each composite body composition. For each type, two
+patienst are missing entire scan values. T1, T2,T3 for one patient, and
+L4 for the other. So for constructing composite body compositions, our
+sample size goes down to 46.
+
+```{r}
+#| echo: false
+#| eval: true
+#| include: true
+#| label: tbl-missing_all_raw
+#| tbl-cap: Table of patients missing all scan values for raw body compositions.
+
+
+#For each composite body composition,
+#Look at each raw body composition.
+#find how many scans are missed from each patient. 
+
+raw_col_names<-list(
+  "IMAT whole (cm3)"=IMAT_ab_chest_cols,
+  "SAT whole (cm3)"=SAT_ab_chest_cols,
+  "SKM whole (cm3)"=SKM_ab_chest_cols,
+  "VAT whole (cm3)"=VAT_ab_chest_cols
+)
+
+all_missing_tab_composite<-
+lapply(raw_col_names,function(raw_cols_for_one_type){
+  #for all 18 columns for a single type of body, find number of missing scans per patient
+  
+  
+  #below returns list of dataframe, one for each T1, T2, ....
+  out<-lapply(raw_cols_for_one_type,function(single_raw_body_comp){
+    #For single raw body composition,
+    
+    #for each raw body composition, find number of scan missing
+    tmp2<-dat_raw[,sum(is.na(get(single_raw_body_comp))),by = mrn]
+    #filter to those who are actually missing any values
+    tmp2<-tmp2[V1>0]
+    setnames(tmp2,"V1","Missing N")
+    
+    #For those who have missing values, append with total observations
+    tmp3<-dat_raw[mrn %in% tmp2$mrn,.N,by=mrn]
+    setnames(tmp3,"N","Total N")
+    
+    #Return all data
+    tmp4<-merge(tmp2,tmp3,by="mrn")
+    
+    #Proportion missing
+    tmp4[,prop_missing:=`Missing N`/`Total N`]
+    
+    #append the location 
+    tmp4[,Location_original:=single_raw_body_comp]
+    tmp4[,Location:=sub('mid.*$', '', single_raw_body_comp)] #erase everything starting the first "mid;"  
+    
+    tmp4
+    
+  })
+  
+  #Bind the list to a single data.table
+  out<-rbindlist(out)
+  
+})
+
+#Is there any patient missing all scan?
+pt_missing_all_raw<-
+lapply(all_missing_tab_composite,function(composite_body){
+  composite_body[prop_missing==1,]
+})
+Composite_body_composition<-rep(names(pt_missing_all_raw), times=sapply(pt_missing_all_raw,nrow))
+pt_missing_all_raw<-rbindlist(pt_missing_all_raw)
+pt_missing_all_raw[,Composite_body_composition:=Composite_body_composition]
+pt_missing_all_raw[,.(mrn,`Missing N`,`Total N`,Location,Composite_body_composition)]|> 
+  gt(rowname_col ="Location", "Composite_body_composition") |> 
+  as_raw_html()    #this is required to omit printing html source in github.
+
+
+#SAVE THE PEOPLE TO EXCLUDE
+exclude_for_composite<-unique(pt_missing_all_raw$mrn)
+# saveRDS(exclude_for_composite,"exclude_for_composite.rds")#<-patients to exclude for imputing raw BC for composite BC.
+```
+
+\
+
+## Simple Models
+
+For assessing changes in longitudinal process, we will first conduct
+simpler non-parametric analyses before diving into more complicated
+joint models.
+
+We will:
+
+::: aside
+Ann, I think the second one is not good for anything. The time distance
+between first and second scan are different!
+:::
+
+1.  Assess association between baseline age and body composition
+2.  Assess difference between the first and last scan values for body
+    compositions
+3.  Asses difference between the first and second scan values for body
+    compositions
+
+\
+
+## Longtiduinal body composition {#sec-LMER}
+
+To assess the patterns of body composition over time, we will fit linear mixed effects (LME) model on each body composition on time along with the confounders. Here's a walk-through.:
+
+
+1. For each body composition, check for normality assumption required for fitting LME by plotting density plot of histogram. For example, if any variable is clearly right skewed, it's not normally distributed. For this case, transformation such as log or square root may be required. 
+2. For each body composition, fit two models that uses different functional form of time: (i) fitting body composition as a linear function of time, and (ii) fitting Y using a flexible nonlinear function of time via natural cubic splines. We are trying to identify the relationship between time and body composition. The first model fits linear assocation, and the second model allows for non-linear assocation. The most suitable functional form will be selected based on an analysis of variance (ANOVA) test and graphical diagnostics (i.e., residuals vs. time plot). Multiple comparisons will be adjusted using the false positive discovery rate (pFDR) procedure with a significance threshold of $q \leq 0.05$.
+3. Next, we will assess the significance of age at metastatic diagnosis using ANOVA for each body composition. This step will determine whether the inclusion of age is warranted, especially since visualizing the relationship between body composition and time could be complicated by the need to select a specific age value. After correcting for multiple comparisons using the pFDR procedure (with $q \leq 0.05$), if age is found to be significant in any model, it will be retained in all models to maintain consistency and clarity in the visualizations and interpretations. 
+4. We will evaluate the significance of the interaction between gender and time to explore whether the rate of change in body composition over time differs between males and females. This interaction term will be assessed using the same statistical approach as described for age.
+5. Similarly, we will assess the significance of the interaction between baseline age and time, to determine if the rate of change in body composition over time varies with baseline age. The significance of this interaction will be evaluated in a manner analogous to that used for age and gender interactions.
+6. For the presentation of the results, we will generate plots of expected values over the course of 1 year with their 95% confidence intervals, stratified by gender. In each plot, baseline age will be fixed at a representative value. For models where baseline age is significant, three panels will be produced corresponding to fixed baseline ages at the 25th, 50th (median), and 75th percentiles of the observed sample. 
+
+
+
+\
+
+## Survival model {#sec-survival}
+
+To assess the association between serial body scan and survival, we will perform the following.
+
+1. Show marginal survival probability over time of all patients using Kaplan-Meier plot
+2. For each body composition, fit time-dependent Cox PH model, adjusted by the baseline covariates.
+3. Provide the hazard ratio (95% confidence interval) between the moderately high and moderately low body composition measurement.
+
+## Joint Models
+
+Note: we aim to fit joint model because it is statistically more valid.
+However, in case we don't have enough data for model convergence, we
+will have to default back to separate model fitting.
+
+We aim to model the changes in body composition (a longitudinal outcome)
+and its impact on the risk of death (a survival outcome) in metastatic
+advanced non-small cell lung cancer (mNSCLC) patients. Our assumption is
+that patients lose fat/muscle as the disease progresses and thus can
+serve as a biomarker for death.
+
+That is, we are interested in modeling two processes:
+
+1.  Patterns of changes in longitudinal process (body composition)
+    changes over time, and
+2.  Patterns of survival process due to longitudinal process.
+
+If these two process are related to one another, modeling them
+separately could cause bias in estimate for both processes.
+
+How the longitudinal process could impact the survival process is
+intuitive. That's main thing we want to study. We hypothesize that
+decreasing body composition over time reflects the patient's increased
+chance of death.
+
+However, the effect of survival process on longitudinal process may not
+be so intuitive if one is not familiar with statistics. We defined the
+interval of collection for longitudinal measurements as one year post
+metastatic diagnosis. However, if patients die within 1 year, the
+longitudinal process is missing. We admit that out measurement of body
+composition is retrospectively collected without pre-determined date for
+measurement. Thus even if a patient dies after 1 year of diagnosis,
+there's no guarantee that the patients would have come to take the CT
+scan. However, if the patient dies, there's no choice for the patient to
+come to measure the body composition.
+
+```{r}
+#| include: false 
+#| eval: true
+
+
+#Count number of death before 1 year. 
+
+dat_raw<-readRDS("../dat_new_death_times.rds")
+dat_raw[,is_baseline:=0]
+dat_raw[times==0,is_baseline:=1]
+baseline_dat<-dat_raw[is_baseline==1,]
+baseline_dat$new_OS_time_yr |> summary()
+#   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.1123  0.7426  1.5934  2.5372  2.6290  8.7036
+
+#Number of death/censoring in 1 year 
+sum(baseline_dat$new_OS_time_yr<1) #16
+#Number of death in 1 year
+baseline_dat[new_OS_time_yr<1 & new_OS_ind==1,.N] #16
+
+num_death_in_year<-baseline_dat[new_OS_time_yr<1 & new_OS_ind==1,.N]
+total_people<-length(unique(baseline_dat$mrn))
+
+#median time to death of those who died within one year
+median_death_within_year<-baseline_dat[new_OS_time_yr<1 & new_OS_ind==1,quantile(new_OS_time_mth,0.5)]
+
+```
+
+To see if this relationship is something we should be worried about for
+the data, we counted the number of people who died prior to the 1 year
+mark. `r num_death_in_year` patients observed death within 1 year of
+metastatic diagnosis, which is
+`r sprintf("%.2f%%",num_death_in_year/total_people*100)` of the total
+population. Also, the median time to death of those who died in 1 year
+is `r round(median_death_within_year,2)` months. This is pretty
+significant percentage. Thus, we decided to model the two processes
+jointly. Thus many people missed about half a year of potential chance
+to get their CT scan measured. Therefore, we concluded that the survival
+process impacted the missingness of the longitudinal process.
+
+## Detailed explanation of Joint model
+
+<!-- {.hidden .unlisted .unnumbered} -->
+
+Initially, we assessed the association between body composition at
+baseline (using the first CT scan) and the risk of death. This approach
+evaluated the potential of body composition metrics as biomarkers of
+disease progression and survival in mNSCLC patients. However, disease
+progression varies not only between patients but also dynamically over
+time within the same patient. Consequently, the full potential of a
+biomarker in describing disease progression and its association with
+survival can only be revealed through repeated measurements over time
+@RizopoulosDimitris2012JMfL. To address this, we collected body
+composition data from the date of metastatic diagnosis up to one year
+after diagnosis.
+
+A straightforward approach might involve modeling the longitudinal body
+composition using a linear mixed-effects model and the survival outcome
+using a time-dependent Cox model. However, this approach has
+limitations. Specifically, the time-dependent Cox model assumes the
+covariate to be "external," meaning that the body composition at time
+point $t$ is not affected by death at time point $u$, with $t >u$
+@KalbfleischJohnD2011TSAo. This assumption is not satisfied for our
+case. Progression towards death (declining health) can impact the body
+composition before death. As patients progress toward death, their
+declining health can influence body composition through physiological
+changes such as muscle and fat wasting, decreased appetite, and
+metabolic dysregulation—hallmarks of terminal illnesses like cancer
+cachexia or end-stage organ failure. Furthermore, body composition
+measurements cease after death, introducing a censoring mechanism that
+reflects a practical limitation rather than a causal relationship. These
+considerations render body composition an "internal" covariate for the
+survival outcome, violating the assumptions of the time-dependent Cox
+model.
+
+Given that both longitudinal body composition and the hazard of death
+are stochastic processes influenced by underlying patient-specific
+factors and interact with each other, joint modeling provides a more
+appropriate framework. By simultaneously modeling these processes, we
+can better capture their dynamic association and the interplay between
+disease progression and survival outcomes.
+
+The joint modeling framework requires the specification of a
+longitudinal submodel to describe the changes of body composition over
+time and a survival submodel to risk of death. These two submodels are
+linked to capture the dynamic interplay between the longitudinal and
+survival processes. Below, we provide a brief explanation of the
+formulation and integration of these submodels.
+
+### Survival submodel
+
+The aim is to measure association between the longitudinal body
+composition and the risk for death (or survival probability), while
+accounting for the special features of the former. To achieve this, we
+introduce the term $m_i(t)$ that denotes the true and unobserved value
+of the longitudinal outcome at time $t$. The observed body composition
+over time is $m_i(t)$ plus a measurement error.
+
+The survival model can be either Cox model or AFT model. In either the
+Cox model, or AFT model, the information $m_i(t)$ is provided as an
+adjusting variable at each death time $t$. We will initially begin
+modeling with a Cox model with unspecified baseline risk function to
+allow maximum flexibility in underlying risk model. However, the
+unspecified baseline risk function may require many death events to for
+estimation. If this approach causes estimation error, we will change to
+piecewise-constant baseline risk function. Note that setting internal
+number of knots to the number of deaths makes piecewise-constant the
+same as the unspecified baseline risk function.
+
+::: aside
+Or we may change to accelerated failure time (AFT) model. The perks of
+using AFT instead Cox PH model is that the subject-specific risk at time
+$t$ depends on the entire body composition history up to time $t$,
+whereas for the Cox PH model, the subject-specific risk depends only on
+the current value of the body composition.
+:::
+
+### Longitudinal Submodel
+
+We need the true body composition $m_i(t)$ for each time point $t$,
+where death occurs. We do not have this value, so we reconstruct the
+complete longitudinal history using the observed values ($y_i(t)$). As
+briefly mentioned, we assume that $y_i(t) = m_i(t) + \epsilon_i(t)$.
+Thus, $m_i(t)$ can be identified by fitting a longitudinal model and
+predicting the value at $t$ of interest.
+
+For our analysis, we decided to use linear mixed models (LMMs) for
+simplicity. Given that we are examining 16 different body compositions,
+we fit 16 separate LMMs. For each body composition, we adjust for age at
+metastatic diagnosis, gender, smoking history, race ethnicity and
+longitudinal effect of age. The longitudinal effect of age is modeled by
+visually examining its marginal association with the body composition
+over time using scatter plots. Time zero represents baseline age, and
+the subsequent observations, marked by time in years, reflect the
+increase in age since the baseline. Similarly, the decision of random
+intercept and slope for time will be determined after visually examining
+the marginal association via scatter plots.
+
+### Monte Carlo Estimation Maximization (MCEM) method with Antithetic Sampling
+
+This section explains how the parametes are estimated in joint model,
+specifically, `mjoint()` function of the `joineRML` package. The package
+uses Monte Carlo Expectation-Maximization (MCEM) with antithetic
+sampling to reduce estimated variance.
+
+#### Model Setup
+
+##### Longitudinal Model
+
+We assume a linear mixed-effects model:
+
+$$
+Y_{ij} = \beta_0 + \beta_1 t_{ij} + b_i + \epsilon_{ij}, \quad \epsilon_{ij} \sim \mathcal{N}(0, \sigma^2_{\epsilon})
+$$
+
+where:
+
+-   $Y_{ij}$ is the longitudinal measurement at time $t_{ij}$.
+-   $\beta_0, \beta_1$ are fixed effects.
+-   $b_i \sim \mathcal{N}(0, \sigma^2_b)$ is the random intercept.
+-   $\epsilon_{ij} \sim \mathcal{N}(0, \sigma^2_{\epsilon})$ is
+    measurement error.
+
+##### Survival Model
+
+The hazard function for the survival process is:
+
+$$
+h(T_i | b_i) = h_0(T_i) \exp(\gamma b_i),
+$$
+
+where:
+
+-   $h_0(T_i)$ is the baseline hazard function.
+-   $\gamma$ captures the association between the survival and
+    longitudinal process.
+-   $b_i$ links both processes.
+
+#### Expectation (E-Step)
+
+he **posterior distribution** of $b_i$ given the observed data
+$(Y_i, T_i)$ is:
+
+$$
+p(b_i | Y_i, T_i) \propto p(Y_i | b_i) p(T_i | b_i) p(b_i)
+$$
+
+Since $b_i \sim \mathcal{N}(0, \sigma^2_b)$, its posterior remains
+**normal**:
+
+$$
+b_i | Y_i, T_i \sim \mathcal{N}(\mu_{b_i}, \sigma^2_{b_i})
+$$
+
+where $\mu_{b_i}$ and $\sigma^2_{b_i}$ can be computed from the joint
+distribution.
+
+#### Complete-Data Log-Likelihood
+
+For a fixed Monte Carlo sample $b_i^{(m)}$, the **complete-data
+log-likelihood** is:
+
+$$
+\log L(\theta ; Y, T, b_i^{(m)}) = \sum_{i=1}^{n} \left[ \log p(Y_i | b_i^{(m)}) + \log p(T_i | b_i^{(m)}) + \log p(b_i^{(m)}) \right]
+$$
+
+where:
+
+1.  **Longitudinal Model Likelihood:** $$
+    \log p(Y_i | b_i^{(m)}) = \sum_{j=1}^{n_i} \log \mathcal{N}(Y_{ij} | \beta_0 + \beta_1 t_{ij} + b_i^{(m)}, \sigma^2_{\epsilon})
+    $$
+
+2.  **Survival Model Likelihood:** $$
+    \log p(T_i | b_i^{(m)}) = \delta_i \left( \log h_0(T_i) + \gamma b_i^{(m)} \right) - \int_0^{T_i} h_0(u) \exp(\gamma b_i^{(m)}) du
+    $$
+
+3.  **Prior on** $b_i$: $$
+    \log p(b_i^{(m)}) = -\frac{1}{2} \left( \frac{(b_i^{(m)})^2}{\sigma^2_b} + \log (2\pi \sigma^2_b) \right)
+    $$
+
+#### Antithetic Monte Carlo Sampling
+
+Instead of **independent** Monte Carlo samples, we use **Antithetic
+Sampling** to **reduce variance**.
+
+1.  **Generate Antithetic Pairs**\
+    For each Monte Carlo sample $b_i^{(m+)}$:
+
+    $$
+    b_i^{(m+)} \sim \mathcal{N}(\mu_{b_i}, \sigma^2_{b_i})
+    $$
+
+    Generate a **negatively correlated** sample:
+
+    $$
+    b_i^{(m-)} = 2\mu_{b_i} - b_i^{(m+)}
+    $$
+
+2.  **Compute Expectation Using Antithetic Pairs**\
+    The expectation is approximated by averaging over both samples:
+
+    $$
+    Q(\theta | \hat{\theta}^{(m)}) \approx \frac{1}{2M} \sum_{m=1}^{M} \left[ \log L(\theta ; Y, T, b_i^{(m+)}) + \log L(\theta ; Y, T, b_i^{(m-)}) \right]
+    $$
+
+3.  **Why This Works**
+
+    -   Since $b_i^{(m+)}$ and $b_i^{(m-)}$ are **mirror images**, their
+        deviations from the mean tend to cancel out.
+    -   This results in a **lower variance estimator** for
+        $Q(\theta | \hat{\theta}^{(m)})$.
+
+#### Maximization (M-Step)
+
+After computing $Q(\theta | \hat{\theta}^{(m)})$, the **M-step** updates
+the parameters:
+
+$$
+\hat{\theta}^{(m+1)} = \arg\max_{\theta} Q(\theta | \hat{\theta}^{(m)})
+$$
+
+using **numerical optimization methods** such as Newton-Raphson.
+
+#### Summary
+
+-   **Antithetic Sampling** improves **Monte Carlo integration
+    efficiency** by reducing variance.
+-   The **log-likelihood function** explicitly combines the
+    **longitudinal model likelihood**, **survival model likelihood**,
+    and **random effects prior**.
+-   The **E-step** approximates expectations using Monte Carlo, while
+    the **M-step** finds the **optimal parameters** via numerical
+    maximization.
+
+\
+
+------------------------------------------------------------------------
+
+## SAS-Style Convergence (convCrit = "sas")
+
+`convCrit = "sas"` is specifically chosen to perform antithetic
+sampling. The stopping rule is as follows.
+
+The MCEM algorithm in `mjoint()` stops based on a combination of:
+
+-   **Monte Carlo Sampling Control** (`nMC`, `nMCscale`, `nMCmax`,
+    `burnin`)
+-   **Maximum Iterations** (`mcmaxIter`)
+-   **Convergence Criteria** (`convCrit`, `tol0`, `tol1`, `tol2`,
+    `tol.em`, `rav`)
+
+The algorithm **stops when either** of the following conditions is met:
+
+1.  **Convergence Criterion is Met** (SAS-style, `convCrit = "sas"`)
+2.  **Maximum Iterations Reached** (`mcmaxIter = 300`)
+3.  **Maximum Monte Carlo Samples Used** (`nMCmax = 20000`)
+
+------------------------------------------------------------------------
+
+### Parameter Stability Stopping Rule
+
+The **primary stopping criteria** follow **Equations 10 and 11** from
+the `joineRML` technical document.
+
+1.  **Relative Change Criterion (Equation 10)** $$\max \left\{ \frac{|\theta^{(m+1)} - \theta^{(m)}|}{|\theta^{(m)}| + \text{tol1}} \right\} < \text{tol2}$$
+
+    where:
+
+    -   **`tol2`** is the **main relative change threshold**.
+    -   **`tol1`** prevents division instability for small parameters.
+
+2.  **Absolute Change Criterion (Equation 11)** $$
+    \max \left\{ |\theta^{(m+1)} - \theta^{(m)}| \right\} < \text{tol0}
+    $$
+
+    where:
+
+    -   **`tol0`** ensures stopping even if the **relative change is
+        small**.
+
+The algorithm **stops when either Equation 10 or Equation 11 is
+satisfied for all parameters**.
+
+------------------------------------------------------------------------
+
+### SAS-Style Convergence
+
+When `convCrit="sas"` is applied, it means that first, we use absolute
+change criterion to test convergence. If, however, for that particular
+parameter, the absolute difference is `>= rav`, then we switch to
+estimate relative change instead. This is useful is the parameter
+estimate has large magnitude.
+
+Suppose the true value of one $\theta$ is 130, with `tol1=0.001` and
+`rav=0.1` (these two values are default values). If we currently have
+128, and our next iteration we have 129, the absolute difference is 1. 1
+is bigger than the default `rav=0.1`. So we switch to relative change.
+The relative change is then $1/(128+0.001)=0.0078$. Now, if we have
+another parameter estimate, with current value at 0.7 and next iteration
+we get 0.79. The absolute difference is 0.09, which is smaller than 0.1,
+so we would not proceed to calculate the relative difference. However,
+for our interest, we calculated the relative difference, and it is
+$0.11/(0.7+0.001)=0.157$. A
+
+Thus, this parameter's absolute difference is smaller while the relative
+difference is bigger than the previous parameter. What we are interested
+in is convergence. Going from 0.7 to 0.79 has much more variability in
+relation to its observed value. It is $15.9\%$ increase from the
+previous value. However, for the first parameter, even though the
+absolute difference is larger, increase was only $0.78\%$, much less
+variability. Thus the first parameter varied much less than the second.
+Thus, using $0.0078$ is more fair for the first paramter.
+
+------------------------------------------------------------------------
+
+### Maximum Iteration Stopping
+
+If none of the convergence criteria are met within **`mcmaxIter`**
+iterations, the algorithm **stops automatically**.
+
+------------------------------------------------------------------------
+
+### Summary
+
+The algorithm stops when **any** of the following conditions are met:
+
+1.  **Parameter stability (`tol0`, `tol2`)**
+    -   **Equation 10 (Relative Change Criterion):**\
+        $$
+        \max \left\{ \frac{|\theta_l^{(m+1)} - \theta_l^{(m)}|}{|\theta_l^{(m)}| + \text{tol1}} \right\} < \text{tol2}
+        $$
+    -   **Equation 11 (Absolute Change Criterion):**\
+        $$
+        \max \left\{ |\theta_l^{(m+1)} - \theta_l^{(m)}| \right\} < \text{tol0}
+        $$
+2.  **Monte Carlo sample limit reached (`nMCmax`)**
+    -   If too many Monte Carlo samples are needed, the algorithm
+        **stops**.
+3.  **Maximum iterations reached (`mcmaxIter`)**
+    -   If none of the above criteria are met within `mcmaxIter`
+        iterations, the algorithm **stops**.
+
+\
+
+## Monitoring $cv(\Delta^{(m+1)}_{rel})$
+
+The term $cv(\Delta^{(m+1)}_{rel})$ refers to the **coefficient of
+variation** of the relative parameter updates.
+
+-   This term is **used to monitor convergence** but is **not an
+    explicit stopping criterion**.
+-   If `cv(Δ)` is **small**, it suggests that **parameter updates are
+    stable**.
+-   The algorithm **still stops** based on **Equations 10 and 11**.
+
+Since **Antithetic Sampling** is used (`type = "antithetic"`), the
+number of Monte Carlo (MC) samples increases **adaptively**:
+
+-   **Initial MC Samples (`nMC`)**
+-   **Scaling Factor (`nMCscale`)**
+    -   If convergence is **not** met, the number of MC samples
+        **increases** by this factor.
+-   **Maximum MC Samples (`nMCmax`)**
+    -   If MC samples exceed `nMCmax`, the algorithm **stops**.
+
+### Why Antithetic Sampling Helps
+
+Since **Antithetic Sampling** is used (`type = "antithetic"`), variance
+in MC samples is **reduced**, meaning:
+
+-   **Faster parameter stabilization** $\rightarrow$ The **SAS-style
+    stopping** is **more efficient**.
+-   **Fewer required Monte Carlo samples** $\rightarrow$ `nMC` increases
+    **more slowly**.
+
+\
+
+## Checking Convergence in R
+
+To check convergence from your `mjoint()` model:
+
+```{r}
+#| eval: false
+#| echo: true
+
+summary(model)
+#OR
+model$convergence
+```
