@@ -73,14 +73,14 @@ of newly diagnosed mNSCLC patients.
 # Data
 
 ::: {#fig-spinal_cord style="float: left; margin: 5px; width: 350px;" fig-cap="Spinal cord location and names."}
-![](spine_image.jpeg)
+![](./SAP_V4_files/figure-gfm/spine_image.jpeg)
 :::
 
   Data were collected from newly diagnosed mNCLC patients (N=71) at the Huntsman Cancer Institute between YYYY/MM/DD to YYYY/MM/DD. This observational study utilized standard-of-care CT scans capturing images from the chest to abdomen (from T1, T2,..., to Sacrum; see @fig-spinal_cord), which were analyzed using DAFS's automated imaging analysis. Our analysis focus on the four **types** of body compositions: intramuscular adipose tissue, subcutaneous adipose tissue, visceral adipose tissue, and skeletal muscle. A representative CT scan illustrating L3 cross-section of these four types is shown in @fig-CT_scan_types. For convenience, the spinal cord locations T1, T2,..., to sacrum will be referred to as **locations**.
   
   
 ::: {#fig-CT_scan_types style="float: right; margin: 5px; width: 350px;" fig-cap="Spinal cord location and names."}
-![](CT_scan_types.jpg)
+![](./SAP_V4_files/figure-gfm/CT_scan_types.jpg)
 :::
 
 

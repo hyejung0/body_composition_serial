@@ -1,7 +1,7 @@
 Statistical Analysis Plan
 ================
 Hyejung Lee <hyejung.lee@utah.edu>
-Thu Mar 27, 2025 13:14:08
+Thu Mar 27, 2025 13:17:00
 
 - [Introduction](#introduction)
 - [Research Objectives](#sec-RO)
@@ -104,7 +104,7 @@ locations T1, T2,…, to sacrum will be referred to as **locations**.
 style="float: right; margin: 5px; width: 350px;"
 fig-cap="Spinal cord location and names.">
 
-![](CT_scan_types.jpg)
+![](./SAP_V4_files/figure-gfm/CT_scan_types.jpg)
 
 </div>
 
