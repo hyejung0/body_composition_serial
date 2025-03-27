@@ -1547,53 +1547,6 @@ Comparing the result with the previous section:
 #generate median survival (95% CI) on marginal time to death. No fitting with variables.
 
 
-# #read in data
-# composite<-readRDS("composite_impute_dat.rds")
-# original<-readRDS("original_impute_dat.rds")
-# 
-# 
-# #Generate combine dataset using baseline only.
-# original_baseline<-copy(original)
-# original_baseline[,is_baseline:=0]
-# original_baseline[times==0,is_baseline:=1]
-# original_baseline<-original_baseline[is_baseline==1,]
-# 
-# composite_baseline<-copy(composite)
-# composite_baseline[,is_baseline:=0]
-# composite_baseline[times==0,is_baseline:=1]
-# composite_baseline<-composite_baseline[is_baseline==1,]
-# 
-# 
-# #Save column names of body compositions of interest
-# dat_dict<-readRDS("dat_dict.rds")
-# dat_dict<-na.locf(dat_dict)
-# body_cols<-dat_dict[`Variable Category` %in% c("IMAT at L3","SAT at L3","SKM at L3","VAT at L3"),`Variable Name`]
-# body_cols<-c(body_cols,stringr::str_subset(colnames(composite_baseline),"whole"))
-
-
-# #generate pretty names 
-# body_cols_pretty<-
-#   sapply(body_cols,function(x){
-#     
-#     pieces_x<-strsplit(x,";")[[1]]
-#     
-#     if("cross_sectional_area_cm2" %in% pieces_x){
-#       paste(pieces_x[2],"(cm2)",sep=" ")
-#       
-#     }else if("volume_cm3" %in% pieces_x){
-#       paste(pieces_x[2],"(cm3)",sep=" ")
-#       
-#     }else if("HU_mean" %in% pieces_x){
-#       paste(pieces_x[2],"(mean HU)",sep=" ")
-#       
-#     }else if(stringr::str_detect(string = x,pattern = "whole")){
-#       pieces_x2<-strsplit(x,"_")[[1]]
-#       
-#       paste(pieces_x2[1],"(whole body cm3)",sep=" ")
-#     }
-#     
-#   })
-
 #Two different survival plots based on 48 vs 46 patients.
 fit1_original <- survfit(Surv(new_OS_time_yr, new_OS_ind) ~ 1, data = original_baseline)
 fit1_composite <- survfit(Surv(new_OS_time_yr, new_OS_ind) ~ 1, data = composite_baseline)
@@ -1656,7 +1609,7 @@ km_plot_composite
 ```
 
 
-@fig-KMplots2 shows Kaplan Meier plot showing survival probability. @fig-KMplots-1 is for the 48 patients used for analyzing original body compositions and @fig-KMplots-2 is for the 46 patients used for analyzing composite body compositions. For both groups, the median survival of patients was `r sprintf("%.2f",summary_fit1_original["median"])` year (95% confidence interval (CI) : `r sprintf("%.2f",summary_fit1_original["0.95LCL"])` – `r sprintf("%.2f",summary_fit1_original["0.95UCL"])`) since the metastatic diagnosis.
+@fig-KMplots2 shows Kaplan Meier plot showing survival probability. @fig-KMplots2-1 is for the 48 patients used for analyzing original body compositions and @fig-KMplots2-2 is for the 46 patients used for analyzing composite body compositions. For both groups, the median survival of patients was `r sprintf("%.2f",summary_fit1_original["median"])` year (95% confidence interval (CI) : `r sprintf("%.2f",summary_fit1_original["0.95LCL"])` – `r sprintf("%.2f",summary_fit1_original["0.95UCL"])`) since the metastatic diagnosis.
 
 
 
@@ -1812,7 +1765,8 @@ HR.dt<-data.table(
      `IQR`=md("**IQR**"),
      `HR (95%CI)`=md("**HR (95%CI)**")
    ) |> 
-   tab_footnote(footnote="* p-value<=0.5")
+   tab_footnote(footnote="* p-value<=0.5") |> 
+   as_raw_html()
 ```
 
 
